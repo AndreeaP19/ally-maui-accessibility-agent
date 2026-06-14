@@ -37,7 +37,7 @@ Run the configuration wizard once before the first scan (or whenever you need to
 /ally config
 ```
 
-The wizard asks **one question at a time** and detects your `.resx` resource files automatically. It produces a `.allyconfig.json` file at the project root.
+The wizard asks **one question at a time** and detects your `.resx` resource files automatically. It produces a `.allyconfig.json` file at the project root, then starts an audit using that configuration.
 
 ### 3. Audit your XAML
 
