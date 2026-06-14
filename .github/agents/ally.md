@@ -69,7 +69,7 @@ search results. Never use example paths.**
 Wizard flow — 3 questions:
 
 ```text
-Setting up .allyconfig.json — scanning the project first.
+Setting up .allyconfig.json — searching the project for .resx files first.
 
 ✓ / ⚠  [collapse all tool calls to one-line status summaries]
 
