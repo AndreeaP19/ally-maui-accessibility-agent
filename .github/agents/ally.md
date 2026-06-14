@@ -218,7 +218,7 @@ Where `[alias]` is the namespace alias from step 2 of the config wizard (e.g.
 Example output:
 
 ```xml
-<Label SemanticProperties.Description="{x:Static strings:AppResources.NotesLabel}" />
+<ImageButton SemanticProperties.Description="{x:Static strings:AppResources.A11y_NotesBtn_Description}" />
 ```
 
 New keys are added to the `.resx` file with value `TODO: add translation`.

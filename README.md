@@ -140,7 +140,7 @@ Nothing is written until you select **[A]** or **[B]**.
 All generated accessibility strings are emitted as `x:Static` expressions:
 
 ```xml
-SemanticProperties.Hint="{x:Static strings:AppResources.A11y_SaveBtn_Hint}"
+SemanticProperties.Description="{x:Static strings:AppResources.A11y_NotesBtn_Description}"
 ```
 
 New resource keys are added to the `.resx` file with the placeholder value `TODO: add translation`. The suggested English text appears in the audit report only — it is never committed to the `.resx` automatically.
