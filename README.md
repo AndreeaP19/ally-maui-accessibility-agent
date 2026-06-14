@@ -87,7 +87,7 @@ The wizard creates this file for you. A typical configuration looks like:
 |---|---|---|
 | `resourceFile` | string | Path to the `.resx` file used for accessibility string keys. |
 | `constantsFile` | string | *(Alternative to `resourceFile`)* Path to a constants file when `localize: false`. |
-| `localize` | boolean | `false` disables `.resx` key generation and fires `MAUI_A11Y_009` for any hardcoded strings. |
+| `localize` | boolean | `false` disables `.resx` key generation and fires `MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` for any hardcoded accessibility strings. |
 | `namespaceAlias` | string | The `xmlns:` alias used to reference the resource class in XAML (e.g. `strings`). |
 | `keyConvention` | string | `"Pascal_Underscore"` or a custom template. |
 | `failOn` | string | Minimum severity that fails a CI gate: `"critical"`, `"major"`, `"minor"`, or `"info"`. |
