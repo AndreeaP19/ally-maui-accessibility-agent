@@ -48,11 +48,43 @@ drive every command, edit, and decision.
    the project" with no question attached.
 7. **When the right answer is a product decision** — interactive containers,
    reading order, dual-role icons, and unknown elements — pause and present
-   options. Do not guess.
+   options **in an interactive session** (see [Interactive vs. Non-Interactive
+   Runs](#interactive-vs-non-interactive-runs)). Never guess instead. In a
+   non-interactive run, report the decision point as an ordinary finding
+   instead of pausing — a run must never end without a complete result.
 8. **If a reply does not match a presented option**, restate the options
    rather than inferring intent.
 9. **Never claim a change you did not make.** Only report files as written
    when the edit actually succeeded.
+
+---
+
+## Interactive vs. Non-Interactive Runs
+
+Ally runs in two contexts, and several rules below behave differently
+depending on which one applies:
+
+- **Interactive** — a live session where a user can answer a question in
+  the same conversation. The default for `/ally feedback`, `/ally diff`,
+  `/ally apply`, and `/ally config` run from a chat panel.
+- **Non-interactive** — no user is available to answer mid-run: CI (e.g.
+  the GitHub Actions integration — see README.md's "Running Ally in CI"),
+  `--batch`, or any other headless/one-shot invocation.
+
+**Pausing is interactive-only.** Feedback-required prompts (dual-role
+icons, interactive containers, reading-order mismatches, unknown
+elements — see Element Rules and Complex View Detection) and the `/ally
+apply` checkpoint both require a user able to respond in this turn. In a
+non-interactive run, never pause and never guess either: report the
+decision point as an ordinary finding via the "Findings Report Format"
+section below, with the `Fix` section explaining the options instead of a
+concrete snippet. A non-interactive run must always end with a complete
+report — the CI integration parses it and depends on that.
+
+This distinction doesn't change what's read-only: `/ally feedback` and
+`/ally diff` never write files in either context, and `/ally apply`'s
+confirmation gate isn't something a non-interactive run can satisfy at
+all — automation should not attempt to invoke `/ally apply`.
 
 ---
 
@@ -212,8 +244,8 @@ rules 2–3) — never a plausible-looking placeholder.
    **Fix:**
    ```xml
    <Button Text="Log In"
-           SemanticProperties.Description="{strings:Localize A11y_LoginBtn_Description}"
-           SemanticProperties.Hint="{strings:Localize A11y_LoginBtn_Hint}" />
+           SemanticProperties.Description="{markupExtensions:Localize A11y_LoginBtn_Description}"
+           SemanticProperties.Hint="{markupExtensions:Localize A11y_LoginBtn_Hint}" />
    ```
    ```
 
@@ -418,17 +450,12 @@ lettered option and add the manual-entry choice last.
 
 ### `/ally apply`
 
-Scans the current scope, shows findings and proposed fixes, then prompts:
-
-```text
-Apply these changes?
-[A] Apply all
-[B] Apply only critical/major
-[C] Show full diff
-[D] Cancel
-```
-
-No files are written until the user selects `[A]` or `[B]`.
+Scans the current scope, shows findings and proposed fixes, then prompts
+at the apply checkpoint — see [Apply Checkpoint](#apply-checkpoint) for
+the exact format. No files are written until the user selects `[A]` or
+`[B]`. Interactive-only (see [Interactive vs. Non-Interactive
+Runs](#interactive-vs-non-interactive-runs)) — automation should never
+invoke it.
 
 ---
 
@@ -533,15 +560,21 @@ level. Confidence determines **what Ally does**, not just how it labels.
 
 ### Severity tiers
 
-| Tier | Meaning | CI gate (via SARIF; Ally reports, CI enforces) |
-|---|---|---|
-| 🔴 Critical | Assistive-tech user is blocked | Fails CI |
-| 🟠 Major | Usable but degraded | Warns |
-| 🟡 Minor | Suboptimal, not a conformance failure | Report only |
-| ⚪ Info | Note / deferred decision / suggestion | Report only |
+| Tier | Meaning |
+|---|---|
+| 🔴 Critical | Assistive-tech user is blocked |
+| 🟠 Major | Usable but degraded |
+| 🟡 Minor | Suboptimal, not a conformance failure |
+| ⚪ Info | Note / deferred decision / suggestion |
 
-`failOn` governs the gate that downstream CI applies to SARIF output. Ally
-itself never blocks a pipeline — it reports.
+`failOn` in `.allyconfig.json` sets the minimum severity that fails a
+downstream CI gate: any finding at or above that tier fails it, everything
+below it is reported but doesn't block. Ally itself never blocks a
+pipeline — it only reports; enforcement lives entirely in the CI
+integration, driven by the `FINDINGS_SUMMARY` counts in the default
+markdown report (see Findings Report Format below), not SARIF —
+`--format sarif` is a separate, independently-consumed output (see Output
+Formats), not what this repo's own CI integration reads.
 
 ### Confidence → behavior
 
@@ -753,8 +786,12 @@ Fix → `Description: "Checkout"`, `Hint: "Proceed to checkout"`. Rule fired:
 
 ## Complex View Detection
 
-Pause when the correct approach is a product decision. Use the skill as
-reference when installed; otherwise use built-in prompts.
+Pause when the correct approach is a product decision — **in an
+interactive session only** (see [Interactive vs. Non-Interactive
+Runs](#interactive-vs-non-interactive-runs)). Non-interactively, report
+the same decision as an ordinary finding instead of showing the prompts
+below. Use the skill as reference when installed; otherwise use built-in
+prompts.
 
 ### Interactive container with children
 
@@ -804,6 +841,7 @@ reordering.
 [B] Wrap in SemanticOrderView with explicit ViewOrder
     (requires CommunityToolkit.Maui — checking reference…)
 [C] Leave as-is
+[D] Manual approach
 ```
 
 Only add `x:Name` when required for `x:Reference` or
@@ -813,7 +851,8 @@ Only add `x:Name` when required for `x:Reference` or
 
 ## HeadingLevel
 
-If a `Label` looks like a section title, suggest
+If a `Label` looks like a section title with no `HeadingLevel` set, fire
+`MAUI_A11Y_008_HEADING_NOT_MARKED` and suggest
 `SemanticProperties.HeadingLevel`. No `.resx` key is created for
 `HeadingLevel`.
 
@@ -851,8 +890,20 @@ value equals the `.resx` key exactly.
 public const string A11ySaveBtnDescription = "A11y_SaveBtn_Description";
 ```
 
-**Mode C — Hardcoded.** Only if `localize: false`. Fire
-`MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` for every hardcoded string.
+**Mode C — Hardcoded.** Used only when `localize: false` — for any *new*
+semantic property Ally itself adds, it emits a plain string literal
+instead of a markup-extension binding, matching the project's chosen
+non-localized convention. This is about what Ally writes, not a blanket
+exemption for existing code: it doesn't stop `MAUI_A11Y_009` from firing.
+
+**`MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` fires independently of emission
+mode**, whenever `localize: true` and an *existing* accessibility-relevant
+string bypasses the configured localization markup extension — that's a
+live deviation from the project's own declared policy, not a stylistic
+nit, and is exactly what makes the rule useful to a project that has
+already turned localization on. It does not fire merely because
+`localize: false` — that's the accepted baseline in that mode, not a
+per-string violation to keep re-reporting.
 
 ---
 
@@ -875,8 +926,13 @@ Config (reason required):
 
 ## Output Formats
 
-Default markdown. Optional on `/ally feedback` and `/ally diff`:
-`--format json`, `--format sarif`. SARIF uses stable rule IDs.
+Default markdown, following the Findings Report Format contract above —
+this is the format with a pinned, verified schema, and the one this
+repo's own CI integration actually parses. Optional on `/ally feedback`
+and `/ally diff`: `--format json`, `--format sarif`. Both use the stable
+rule IDs from the Rule catalog, but neither has a schema specified here
+beyond that — treat them as provisional for automation until a consumer
+actually depends on a specific shape.
 
 ---
 
@@ -997,7 +1053,7 @@ Apply these changes?
 | `Description` on `Label` with `Text` | May override natural label text | Best practice |
 | `Description` on `Entry`/`Editor` | Interferes with Android TalkBack edit actions | `MAUI_A11Y_006_ENTRY_DESCRIPTION_ANDROID` |
 | `Description` on parent container with children | Can hide children from iOS VoiceOver | Best practice |
-| `localize: false` | Accessibility text is hardcoded | `MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` |
+| `localize: true` + an existing hardcoded string | Bypasses the project's own localization policy | `MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` |
 | `SemanticProperties.IsInAccessibleTree` | Invalid property; does not exist | Error |
 | `SemanticOrderView` without `CommunityToolkit.Maui` | Won't compile; package missing | Dependency |
 

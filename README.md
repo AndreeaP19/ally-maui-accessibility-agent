@@ -145,7 +145,7 @@ The wizard creates this file for you. A typical configuration looks like:
 | `resxPath` | string | Path to the `.resx` file used for accessibility string keys. |
 | `constantsFile` | string | Path to a constants file. Required (alongside `localize: false`) when the project has no `.resx` file; optional supplement otherwise. |
 | `constantsClassPath` | string | Fully-qualified class path for the constants class (e.g. `CoreConstants.TranslationKeys`), when `constantsFile` is set. |
-| `localize` | boolean | `false` disables `.resx` key generation and fires `MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` for any hardcoded accessibility strings. |
+| `localize` | boolean | `false` disables `.resx` key generation — Ally itself then emits plain string literals for any new property it adds, instead of a markup-extension binding. `MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` fires the other way around: when `true` and an *existing* string bypasses the localization markup extension, since that's a live deviation from the project's own policy. |
 | `localizeNamespace` | string | The `xmlns:` alias used to reference the localization markup extension in XAML (e.g. `strings`). |
 | `keyPrefix` | string | Prefix applied to generated `.resx` keys (e.g. `A11y`). |
 | `placeholderValue` | string | Placeholder value written for new `.resx` entries until translated. Defaults to `"TODO: add translation"`. |
