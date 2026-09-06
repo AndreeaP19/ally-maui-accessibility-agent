@@ -255,16 +255,13 @@ jobs:
               }
             }
 
-            const summaryHeader = total === 0
+            // The summary comment is just this — nothing else. Everything
+            // else (inline findings, and any that couldn't be anchored to a
+            // line) belongs to the review below, not this comment.
+            const summaryBody = total === 0
               ? '## 🔍 Ally Accessibility Audit\n\n✅ No accessibility findings detected.'
               : `## 🔍 Ally Accessibility Audit\n\nFindings by severity: ${summaryLine}`;
-            const summaryBody = unanchored.length > 0
-              ? `${summaryHeader}\n\n---\n\n**Findings that couldn't be anchored to a specific line:**\n\n${unanchored.join('\n\n---\n\n')}`
-              : summaryHeader;
 
-            // Always post the summary as its own standalone comment, separate
-            // from the inline review below — one place to see the overall
-            // result without scrolling through every inline comment.
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -272,13 +269,24 @@ jobs:
               body: summaryBody,
             });
 
-            if (inlineComments.length > 0) {
+            if (total > 0) {
               // One review, submitted like a human reviewer would: every
               // finding as an inline comment on its own line — instead of
               // either a flat issue comment or N separate single-comment
-              // "reviews" cluttering the PR timeline. The summary above
-              // already covers the overview, so this review's own body stays
-              // short.
+              // "reviews" cluttering the PR timeline. Findings that
+              // couldn't be anchored to a line go in the review body
+              // instead, rather than padding out the summary comment above.
+              const reviewBodyParts = [];
+              if (inlineComments.length > 0) {
+                reviewBodyParts.push(`Ally posted ${inlineComments.length} inline comment(s) below.`);
+              }
+              if (unanchored.length > 0) {
+                reviewBodyParts.push(
+                  `**Findings that couldn't be anchored to a specific line:**\n\n${unanchored.join('\n\n---\n\n')}`
+                );
+              }
+              const reviewBody = reviewBodyParts.join('\n\n---\n\n');
+
               try {
                 await github.rest.pulls.createReview({
                   owner: context.repo.owner,
@@ -286,7 +294,7 @@ jobs:
                   pull_number,
                   commit_id,
                   event: 'COMMENT',
-                  body: `Ally posted ${inlineComments.length} inline comment(s) below.`,
+                  body: reviewBody,
                   comments: inlineComments.map(({ path, line, side, body }) => ({ path, line, side, body })),
                 });
               } catch (err) {
@@ -296,6 +304,14 @@ jobs:
                 // back to posting each inline comment individually so one
                 // bad line doesn't sink every other finding.
                 core.warning(`createReview failed (${err.message}); falling back to individual review comments.`);
+                if (unanchored.length > 0) {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: context.issue.number,
+                    body: `**Findings that couldn't be anchored to a specific line:**\n\n${unanchored.join('\n\n---\n\n')}`,
+                  });
+                }
                 for (const { ruleId, path, line, side, body } of inlineComments) {
                   try {
                     await github.rest.pulls.createReviewComment({
