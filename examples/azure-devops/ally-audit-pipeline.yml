@@ -25,6 +25,11 @@
 # defaultBaseBranch (e.g. a release branch), the diff will still be taken
 # against defaultBaseBranch — update it, or unset it to always follow the
 # PR's real target.
+#
+# .allyconfig.json is read from the PR's target branch (via `git show`), not
+# from the PR's own working tree — a PR can't smuggle in a defaultBaseBranch
+# that points at a ref already containing its own changes to make the diff,
+# and the audit, disappear.
 
 trigger: none
 
@@ -56,19 +61,23 @@ steps:
 
   - script: |
       set -e
-      CONFIG_BASE=""
-      if [ -f .allyconfig.json ]; then
-        CONFIG_BASE=$(python3 -c "import json; print(json.load(open('.allyconfig.json')).get('defaultBaseBranch',''))" 2>/dev/null || true)
-      fi
+      TRUSTED_BRANCH_NAME="${TARGET_BRANCH#refs/heads/}"
+      git fetch origin "$TRUSTED_BRANCH_NAME" --depth=1
+      CONFIG_BASE=$(git show "origin/$TRUSTED_BRANCH_NAME:.allyconfig.json" 2>/dev/null | python3 -c "import json, sys; raw = sys.stdin.read(); d = json.loads(raw) if raw.strip() else {}; print((d or {}).get('defaultBaseBranch') or '')" 2>/dev/null || true)
       if [ -n "$CONFIG_BASE" ]; then
-        echo "Using defaultBaseBranch from .allyconfig.json: $CONFIG_BASE"
+        echo "Using defaultBaseBranch from .allyconfig.json (as committed on $TRUSTED_BRANCH_NAME): $CONFIG_BASE"
         echo "##vso[task.setvariable variable=targetBranchName]$CONFIG_BASE"
       else
         echo "No defaultBaseBranch in .allyconfig.json — using this PR's actual target branch."
-        echo "##vso[task.setvariable variable=targetBranchName]${TARGET_BRANCH#refs/heads/}"
+        echo "##vso[task.setvariable variable=targetBranchName]$TRUSTED_BRANCH_NAME"
       fi
     displayName: "Resolve base branch"
     env:
+      # Trusted: from the pull request's own metadata, not its file content.
+      # .allyconfig.json is read from this branch's git history above — never
+      # from the PR's own working tree — so a PR can't set defaultBaseBranch
+      # to a ref that already contains its own changes and make the diff
+      # (and the audit) disappear.
       TARGET_BRANCH: $(System.PullRequest.TargetBranch)
 
   - script: |

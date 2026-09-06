@@ -152,6 +152,8 @@ The wizard creates this file for you. A typical configuration looks like:
 
 ### Rule Catalog
 
+<!-- Keep this table in sync with .github/agents/ally.md's "Rule catalog" section. -->
+
 | Rule ID | Default Severity | Confidence | Description |
 |---|---|---|---|
 | `MAUI_A11Y_001_ICON_ONLY_TOOLBAR` | Critical | High | `ToolbarItem` / `ImageButton` has icon but no accessible name |

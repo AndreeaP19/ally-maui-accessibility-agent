@@ -176,6 +176,14 @@ save):
 
 - `constantsFile`, `defaultBaseBranch`, `failOn`, rule severities.
 
+The 6-question flow below is for a **full save**. For a **temporary
+one-time config** (chosen via `[B]` on the missing-config prompt in
+[Scope](#scope)), ask only the questions covering the minimum required
+values above (typically 1, 2, and 4) and skip 3, 5, and 6, applying these
+defaults instead: no constants file, no `defaultBaseBranch` (so `/ally diff`
+always requires an explicit `[base-branch]` for the rest of this run), and
+`failOn: critical`.
+
 Flow — 6 questions, then a preview + save step:
 
 ```text
@@ -473,6 +481,8 @@ itself never blocks a pipeline — it reports.
 | Low | Weak / incomplete context | **Report only.** Surface as a suggestion or a feedback-required prompt; never auto-apply |
 
 ### Rule catalog
+
+<!-- Keep this table in sync with README.md's "Rule Catalog" section. -->
 
 | Rule ID | Default Severity | Confidence | Description |
 |---|---|---|---|

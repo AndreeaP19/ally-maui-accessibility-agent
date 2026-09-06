@@ -6,6 +6,11 @@ name: Ally Accessibility Audit
 # defaultBaseBranch (e.g. a release branch), the diff will still be taken
 # against defaultBaseBranch — update it, or unset it to always follow the
 # PR's real target.
+#
+# .allyconfig.json is read from the PR's target branch (via `git show`), not
+# from the PR's own working tree — a PR can't smuggle in a defaultBaseBranch
+# that points at a ref already containing its own changes to make the diff,
+# and the audit, disappear.
 
 on:
   workflow_call:
@@ -40,17 +45,22 @@ jobs:
 
       - name: Resolve base branch
         id: base
+        env:
+          # Trusted: from the pull_request event payload, not the PR's own
+          # file content. .allyconfig.json is read from this ref's git
+          # history below — never from the PR head's working tree — so a
+          # PR can't set defaultBaseBranch to a ref that already contains
+          # its own changes and make the diff (and the audit) disappear.
+          TRUSTED_BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          CONFIG_BASE=""
-          if [ -f .allyconfig.json ]; then
-            CONFIG_BASE=$(jq -r '.defaultBaseBranch // empty' .allyconfig.json 2>/dev/null || true)
-          fi
+          git fetch origin "$TRUSTED_BASE_REF" --depth=1
+          CONFIG_BASE=$(git show "origin/$TRUSTED_BASE_REF:.allyconfig.json" 2>/dev/null | jq -r '.defaultBaseBranch // empty' 2>/dev/null || true)
           if [ -n "$CONFIG_BASE" ]; then
-            echo "Using defaultBaseBranch from .allyconfig.json: $CONFIG_BASE"
+            echo "Using defaultBaseBranch from .allyconfig.json (as committed on $TRUSTED_BASE_REF): $CONFIG_BASE"
             echo "base_ref=$CONFIG_BASE" >> "$GITHUB_OUTPUT"
           else
             echo "No defaultBaseBranch in .allyconfig.json — using this PR's actual target branch."
-            echo "base_ref=${{ github.event.pull_request.base.ref }}" >> "$GITHUB_OUTPUT"
+            echo "base_ref=$TRUSTED_BASE_REF" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Find changed XAML files
