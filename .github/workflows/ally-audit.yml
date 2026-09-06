@@ -56,8 +56,7 @@ jobs:
             echo "Using defaultBaseBranch from .allyconfig.json: $CONFIG_BASE"
             echo "base_ref=$CONFIG_BASE" >> "$GITHUB_OUTPUT"
           else
-            PR_BASE_REF="${{ github.event.pull_request.base.ref }}"
-            PR_BASE_REF="${PR_BASE_REF#refs/heads/}"
+            PR_BASE_REF="${TRUSTED_BASE_REF#refs/heads/}"
             PR_BASE_REF="${PR_BASE_REF#origin/}"
             echo "No defaultBaseBranch in .allyconfig.json — using this PR's actual target branch."
             echo "base_ref=$PR_BASE_REF" >> "$GITHUB_OUTPUT"
@@ -72,8 +71,12 @@ jobs:
           BASE_REF="${BASE_REF#refs/heads/}"
           BASE_REF="${BASE_REF#origin/}"
           # No --depth: a shallow fetch here can't be undone by a later
-          # plain re-fetch, and would break the merge-base diff below.
-          git fetch origin "$BASE_REF"
+          # plain re-fetch, and would break the merge-base diff below. Skip
+          # entirely if the previous step already fetched this same ref
+          # (the common case, when .allyconfig.json has no override).
+          if ! git rev-parse --verify -q "origin/$BASE_REF" > /dev/null; then
+            git fetch origin "$BASE_REF"
+          fi
           CHANGED=$(git diff --name-only --diff-filter=ACMR "origin/$BASE_REF...HEAD" -- "$XAML_GLOB")
 
           if [ -z "$CHANGED" ]; then
