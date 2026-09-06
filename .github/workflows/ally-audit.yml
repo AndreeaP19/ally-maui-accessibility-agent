@@ -1,14 +1,11 @@
 name: Ally Accessibility Audit
 
-# Base branch resolution: diffs against .allyconfig.json's defaultBaseBranch
-# when set, falling back to the PR's actual target branch otherwise. Read
-# from the PR's target branch via `git show`, never the PR's own working
-# tree, so a PR can't point defaultBaseBranch at a ref that already contains
-# its own changes to make the diff disappear.
-#
-# If this repo's PRs sometimes target a branch other than defaultBaseBranch
-# (e.g. a release branch), the diff is still taken against defaultBaseBranch
-# — keep it in sync, or leave it unset to always follow the PR's real target.
+# Base branch: this workflow always diffs against the PR's actual target
+# branch (github.event.pull_request.base.ref) — not .allyconfig.json's
+# defaultBaseBranch, which only affects local/manual `/ally diff`
+# invocations that omit [base-branch]. Using the PR's real target keeps
+# the diff correct even for repos where PRs sometimes target a branch
+# other than main (e.g. a release branch).
 
 on:
   workflow_call:
@@ -41,40 +38,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve base branch
-        id: base
-        env:
-          TRUSTED_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: |
-          # No --depth: a shallow fetch here can't be undone by a later
-          # plain re-fetch, and would break the merge-base diff below.
-          git fetch origin "$TRUSTED_BASE_REF"
-          CONFIG_BASE=$(git show "origin/$TRUSTED_BASE_REF:.allyconfig.json" 2>/dev/null | jq -r '.defaultBaseBranch // empty' 2>/dev/null || true)
-          if [ -n "$CONFIG_BASE" ]; then
-            echo "Using defaultBaseBranch from .allyconfig.json (as committed on $TRUSTED_BASE_REF): $CONFIG_BASE"
-            echo "base_ref=$CONFIG_BASE" >> "$GITHUB_OUTPUT"
-          else
-            PR_BASE_REF="${TRUSTED_BASE_REF#refs/heads/}"
-            PR_BASE_REF="${PR_BASE_REF#origin/}"
-            echo "No defaultBaseBranch in .allyconfig.json — using this PR's actual target branch."
-            echo "base_ref=$TRUSTED_BASE_REF" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Find changed XAML files
         id: diff
         env:
           XAML_GLOB: ${{ inputs.xaml-glob }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          BASE_REF="${BASE_REF#refs/heads/}"
-          BASE_REF="${BASE_REF#origin/}"
           # No --depth: a shallow fetch here can't be undone by a later
-          # plain re-fetch, and would break the merge-base diff below. Skip
-          # entirely if the previous step already fetched this same ref
-          # (the common case, when .allyconfig.json has no override).
-          if ! git rev-parse --verify -q "origin/$BASE_REF" > /dev/null; then
-            git fetch origin "$BASE_REF"
-          fi
+          # plain re-fetch, and would break the merge-base diff below.
+          git fetch origin "$BASE_REF"
           CHANGED=$(git diff --name-only --diff-filter=ACMR "origin/$BASE_REF...HEAD" -- "$XAML_GLOB")
 
           if [ -z "$CHANGED" ]; then
