@@ -26,8 +26,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      copilot-requests: write
     uses: ./.github/workflows/ally-audit.yml
     with:
       xaml-glob: "examples/sample-app/**/*.xaml"
-    secrets:
-      copilot-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
