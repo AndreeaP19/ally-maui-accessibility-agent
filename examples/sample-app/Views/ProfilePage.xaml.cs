@@ -11,4 +11,9 @@ public partial class ProfilePage : ContentPage
     {
         await DisplayAlertAsync("Manage Plan", "Plan management isn't available in this sample.", "OK");
     }
+
+    private async void OnAvatarTapped(object sender, EventArgs e)
+    {
+        await DisplayAlertAsync("Change Photo", "Photo upload isn't available in this sample.", "OK");
+    }
 }

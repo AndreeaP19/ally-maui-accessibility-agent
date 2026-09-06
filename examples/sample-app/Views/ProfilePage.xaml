@@ -5,11 +5,21 @@
              Title="Profile">
     <VerticalStackLayout Padding="24" Spacing="16">
 
-        <Image Source="avatar_placeholder.png"
-               WidthRequest="80"
+        <Image WidthRequest="80"
                HeightRequest="80"
-               HorizontalOptions="Center"
-               SemanticProperties.Description="User avatar placeholder" />
+               HorizontalOptions="Center">
+            <Image.GestureRecognizers>
+                <TapGestureRecognizer Tapped="OnAvatarTapped" />
+            </Image.GestureRecognizers>
+            <Image.Source>
+                <FontImageSource FontFamily="MaterialIcons" Glyph="&#xe853;" />
+            </Image.Source>
+        </Image>
+
+        <Image Source="verified_badge.png"
+               WidthRequest="20"
+               HeightRequest="20"
+               HorizontalOptions="Center" />
 
         <Label Text="Account Details"
                FontSize="20"
@@ -18,6 +28,10 @@
 
         <Label Text="Phone" FontSize="12" />
         <Entry x:Name="PhoneEntry" Placeholder="Phone number" />
+
+        <Label Text="Subscription"
+               FontSize="20"
+               FontAttributes="Bold" />
 
         <Frame x:Name="PlanCard" BorderColor="#DDDDDD" CornerRadius="8" Padding="16">
             <VerticalStackLayout Spacing="4">
