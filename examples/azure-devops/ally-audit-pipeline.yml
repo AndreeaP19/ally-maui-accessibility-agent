@@ -39,6 +39,7 @@ steps:
       versionSpec: "20.x"
     displayName: "Use Node.js 20"
 
+  # Keep this version aligned with .github/workflows/ally-audit.yml.
   - script: npm install -g @github/copilot@1.0.83
     displayName: "Install GitHub Copilot CLI"
 
@@ -82,7 +83,11 @@ steps:
 
   - script: |
       set -e
-      REPORT_JSON=$(python3 -c "import json; print(json.dumps(open('ally-report.md').read()))")
+      if [ -f ally-report.md ]; then
+        REPORT_JSON=$(python3 -c "import json; print(json.dumps(open('ally-report.md').read()))")
+      else
+        REPORT_JSON=$(python3 -c "import json; print(json.dumps('Ally produced no output.'))")
+      fi
       BODY=$(printf '{"comments":[{"parentCommentId":0,"content":%s,"commentType":1}],"status":1}' "$REPORT_JSON")
 
       curl -sS -f -u ":$SYSTEM_ACCESSTOKEN" \
