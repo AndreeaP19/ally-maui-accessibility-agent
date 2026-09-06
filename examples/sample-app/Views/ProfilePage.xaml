@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="SampleApp.Views.ProfilePage"
+             Title="Profile">
+    <VerticalStackLayout Padding="24" Spacing="16">
+
+        <Image Source="avatar_placeholder.png"
+               WidthRequest="80"
+               HeightRequest="80"
+               HorizontalOptions="Center"
+               SemanticProperties.Description="User avatar placeholder" />
+
+        <Label Text="Account Details"
+               FontSize="20"
+               FontAttributes="Bold"
+               SemanticProperties.HeadingLevel="Level1" />
+
+        <Label Text="Phone" FontSize="12" />
+        <Entry x:Name="PhoneEntry" Placeholder="Phone number" />
+
+        <Frame x:Name="PlanCard" BorderColor="#DDDDDD" CornerRadius="8" Padding="16">
+            <VerticalStackLayout Spacing="4">
+                <Label Text="Pro Plan" FontAttributes="Bold" />
+                <Button Text="Manage" Clicked="OnManagePlanClicked" />
+            </VerticalStackLayout>
+        </Frame>
+
+    </VerticalStackLayout>
+</ContentPage>

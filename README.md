@@ -116,7 +116,7 @@ This sets the CLI's `COPILOT_MODEL` environment variable for the audit step only
 
 ### Sample app (CI self-test)
 
-[`examples/sample-app/`](examples/sample-app/) is a minimal MAUI project — a couple of `.xaml` files seeded with deliberate accessibility violations and a matching `.resx` — that exists to exercise the CI integration for real, not just document it. [`.github/workflows/sample-app-audit.yml`](.github/workflows/sample-app-audit.yml) runs the GitHub Actions integration against it on every PR that touches the sample files, the agent, or the reusable workflow, so a broken pipeline shows up as a failed check instead of silently rotting. It relies on the same `copilot-requests: write` permission described above — no secret needed.
+[`examples/sample-app/`](examples/sample-app/) is a small but functional and buildable MAUI app — Login page → Home (a Shell with a flyout) → Settings → Profile — that exists to exercise the CI integration for real, not just document it. Its XAML is a clean, accessible reference implementation (localized `SemanticProperties`, explicit `Slider` ranges, persistent `Picker` labels, and so on) rather than a fixture seeded with violations, so a passing `/ally diff` run demonstrates the pipeline working end-to-end on real, working screens. [`.github/workflows/sample-app-audit.yml`](.github/workflows/sample-app-audit.yml) runs the GitHub Actions integration against it on every PR that touches the sample files, the agent, or the reusable workflow, so a broken pipeline shows up as a failed check instead of silently rotting. It relies on the same `copilot-requests: write` permission described above — no secret needed.
 
 ---
 
@@ -299,7 +299,7 @@ After applying fixes, verify accessibility manually:
     ally-audit.yml        ← Reusable CI workflow (see "Running Ally in CI")
     sample-app-audit.yml  ← Wires the sample app below to that workflow
 examples/
-  sample-app/             ← Minimal MAUI-style project used to self-test CI
+  sample-app/             ← Clean, functional MAUI reference app used to self-test CI
   github-actions/         ← Caller workflow example for consuming repos
 .allyconfig.json          ← Config for auditing examples/sample-app/ in this repo
 README.md                 ← This file

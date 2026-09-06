@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="SampleApp.Views.MainPage"
+             Title="Home">
+    <VerticalStackLayout Padding="24" Spacing="16">
+
+        <Label Text="Welcome back!"
+               FontSize="24"
+               SemanticProperties.HeadingLevel="Level1" />
+
+        <Label Text="Open the menu to reach Settings, or log out below."
+               FontSize="14" />
+
+        <Button Text="Log Out"
+                Clicked="OnLogoutClicked"
+                HorizontalOptions="Start" />
+
+    </VerticalStackLayout>
+</ContentPage>

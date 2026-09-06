@@ -1,18 +1,21 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!--
-    Minimal, illustrative project file — not meant to be built. It only
-    exists so this folder reads as a real .NET MAUI project for Ally to
-    scan. The CI workflow (.github/workflows/sample-app-audit.yml) only
-    statically scans the .xaml files below; it never runs `dotnet build`,
-    and the MAUI workload isn't installed on the runner.
-  -->
-
   <PropertyGroup>
-    <TargetFrameworks>net8.0-android;net8.0-ios</TargetFrameworks>
+    <TargetFrameworks>net10.0-android;net10.0-ios</TargetFrameworks>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
     <UseMaui>true</UseMaui>
     <SingleProject>true</SingleProject>
     <RootNamespace>SampleApp</RootNamespace>
+    <ApplicationTitle>Sample App</ApplicationTitle>
+    <ApplicationId>com.allymaui.sampleapp</ApplicationId>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Maui.Controls" Version="10.0.20" />
+  </ItemGroup>
 
 </Project>
