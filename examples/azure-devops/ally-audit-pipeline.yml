@@ -19,17 +19,15 @@
 #      copy — it's project-specific. Run /ally config in this repo (if it
 #      hasn't been already) to generate and commit one.
 #
-# Base branch resolution: this pipeline diffs against .allyconfig.json's
-# defaultBaseBranch when set, falling back to the PR's actual target branch
-# otherwise. If this repo's PRs ever target a branch other than
-# defaultBaseBranch (e.g. a release branch), the diff will still be taken
-# against defaultBaseBranch — update it, or unset it to always follow the
-# PR's real target.
+# Base branch resolution: diffs against .allyconfig.json's defaultBaseBranch
+# when set, falling back to the PR's actual target branch otherwise. Read
+# from the PR's target branch via `git show`, never the PR's own working
+# tree, so a PR can't point defaultBaseBranch at a ref that already contains
+# its own changes to make the diff disappear.
 #
-# .allyconfig.json is read from the PR's target branch (via `git show`), not
-# from the PR's own working tree — a PR can't smuggle in a defaultBaseBranch
-# that points at a ref already containing its own changes to make the diff,
-# and the audit, disappear.
+# If this repo's PRs sometimes target a branch other than defaultBaseBranch
+# (e.g. a release branch), the diff is still taken against defaultBaseBranch
+# — keep it in sync, or leave it unset to always follow the PR's real target.
 
 trigger: none
 
@@ -62,10 +60,8 @@ steps:
   - script: |
       set -e
       TRUSTED_BRANCH_NAME="${TARGET_BRANCH#refs/heads/}"
-      # No --depth here: this ref is fetched once per job, and a shallow
-      # fetch would leave it permanently unable to compute a merge-base
-      # against HEAD (a later non-shallow re-fetch of the same ref does
-      # not clear that boundary — see the three-dot diff below).
+      # No --depth: a shallow fetch here can't be undone by a later plain
+      # re-fetch, and would break the merge-base diff below.
       git fetch origin "$TRUSTED_BRANCH_NAME"
       CONFIG_BASE=$(git show "origin/$TRUSTED_BRANCH_NAME:.allyconfig.json" 2>/dev/null | python3 -c "import json, sys; raw = sys.stdin.read(); d = json.loads(raw) if raw.strip() else {}; print((d or {}).get('defaultBaseBranch') or '')" 2>/dev/null || true)
       if [ -n "$CONFIG_BASE" ]; then
@@ -77,11 +73,6 @@ steps:
       fi
     displayName: "Resolve base branch"
     env:
-      # Trusted: from the pull request's own metadata, not its file content.
-      # .allyconfig.json is read from this branch's git history above — never
-      # from the PR's own working tree — so a PR can't set defaultBaseBranch
-      # to a ref that already contains its own changes and make the diff
-      # (and the audit) disappear.
       TARGET_BRANCH: $(System.PullRequest.TargetBranch)
 
   - script: |
