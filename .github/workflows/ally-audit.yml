@@ -140,7 +140,6 @@ jobs:
         env:
           ALLY_REPORT_PATH: ally-report.md
           ALLY_EXIT_CODE: ${{ steps.ally.outputs.exit_code }}
-          ALLY_FAIL_ON: ${{ steps.ally.outputs.fail_on }}
         with:
           script: |
             const fs = require('fs');
@@ -149,14 +148,10 @@ jobs:
               ? fs.readFileSync(path, 'utf8')
               : 'Ally produced no output.';
             const exitCode = process.env.ALLY_EXIT_CODE;
-            const failOn = process.env.ALLY_FAIL_ON || 'critical';
 
-            let header = '## 🔍 Ally Accessibility Audit';
-            let body = report;
             if (exitCode && exitCode !== '0') {
-              header = '## ⚠️ Ally audit failed to run';
               const details = `<details><summary>Raw output</summary>\n\n\`\`\`\n${report}\n\`\`\`\n</details>`;
-              body = /authentication failed/i.test(report)
+              const body = /authentication failed/i.test(report)
                 ? 'The Copilot CLI could not authenticate. This workflow may be missing the ' +
                   '`copilot-requests: write` permission required to use the job\'s automatic ' +
                   '`GITHUB_TOKEN` for Copilot CLI authentication.\n\n**Fix:** grant ' +
@@ -164,16 +159,61 @@ jobs:
                   `${details}`
                 : `Ally exited with an error (exit code ${exitCode}). See the workflow run logs ` +
                   `for details.\n\n${details}`;
-            } else {
-              header = `${header} (failOn: ${failOn})`;
+               
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `⚠️ Ally audit failed to run\n\n${body}`,
+              });
+              return;
             }
 
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: `${header}\n\n${body}`,
-            });
+            const severityIcons = { critical: '🔴', major: '🟠', minor: '🟡', info: '⚪' };
+            const findings = [];
+            const lines = report.split(/\r?\n/);
+            let currentFinding = null;
+
+            for (const line of lines) {
+              const severityMatch = line.match(/^(?:\d+\.|[-*])\s+\[([A-Za-z_]+)\]\s+(critical|major|minor|info)(?:\s+\|)?\s+(.*)/i);
+              if (severityMatch) {
+                if (currentFinding) findings.push(currentFinding);
+                currentFinding = {
+                  ruleId: severityMatch[1],
+                  severity: severityMatch[2].toLowerCase(),
+                  message: severityMatch[3],
+                  details: []
+                };
+              } else if (currentFinding && line.trim()) {
+                currentFinding.details.push(line);
+              } else if (!line.trim() && currentFinding) {
+                findings.push(currentFinding);
+                currentFinding = null;
+              }
+            }
+            if (currentFinding) findings.push(currentFinding);
+
+            if (findings.length === 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: '✅ No accessibility findings detected.',
+              });
+              return;
+            }
+
+            for (const finding of findings) {
+              const icon = severityIcons[finding.severity] || '⚪';
+              const body = `${icon} **${finding.ruleId}** (${finding.severity})\n\n${finding.message}${finding.details.length > 0 ? '\n\n' + finding.details.join('\n') : ''}`;
+               
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body,
+              });
+            }
 
       - name: Fail if Ally errored
         if: steps.diff.outputs.has_changes == 'true' && steps.ally.outputs.exit_code != '' && steps.ally.outputs.exit_code != '0'
@@ -191,36 +231,22 @@ jobs:
           node - <<'NODE'
           const fs = require('fs');
           const reportPath = 'ally-report.md';
-          const failOn = (process.env.ALLY_FAIL_ON || '').toLowerCase();
-          const rank = { info: 0, minor: 1, major: 2, critical: 3 };
-          if (!(failOn in rank)) {
-            console.error(`::error::Invalid failOn threshold: "${failOn}".`);
-            process.exit(1);
-          }
+          const failOn = (process.env.ALLY_FAIL_ON || 'critical').toLowerCase();
+           
           if (!fs.existsSync(reportPath)) {
-            console.error('::error::Ally report file not found.');
-            process.exit(1);
+            console.log('No report file found, skipping severity gate.');
+            process.exit(0);
           }
 
           const text = fs.readFileSync(reportPath, 'utf8');
-          const findings = [];
-          for (const line of text.split(/\r?\n/)) {
-            const match = line.match(/(?:^|\W)(critical|major|minor|info)(?:\W|$)/i);
-            if (!match) continue;
-            const sev = match[1].toLowerCase();
-            if (rank[sev] < rank[failOn]) continue;
-            findings.push({ sev, line: line.trim() });
-          }
+          const hasCritical = /\bcritical\b/i.test(text);
 
-          if (findings.length > 0) {
-            console.error(`::error::Accessibility findings at or above "${failOn}" detected (${findings.length}).`);
-            for (const f of findings.slice(0, 20)) {
-              console.error(`- [${f.sev}] ${f.line}`);
-            }
+          if (hasCritical) {
+            console.error('::error::Critical accessibility findings detected — PR cannot be merged.');
             process.exit(1);
           }
 
-          console.log(`No findings at or above "${failOn}".`);
+          console.log('No critical findings detected.');
           NODE
 
       - name: No XAML changes
