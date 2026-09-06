@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:strings="clr-namespace:SampleApp.Resources.Localization"
+             x:Class="SampleApp.Views.LoginPage"
+             Title="Login">
+    <VerticalStackLayout Padding="24" Spacing="16">
+
+        <!-- Deliberate violation: icon-only ImageButton with no accessible name.
+             Expected finding: MAUI_A11Y_001_ICON_ONLY_TOOLBAR -->
+        <ImageButton Source="back_arrow.png"
+                     Clicked="OnBackTapped"
+                     HorizontalOptions="Start" />
+
+        <Label Text="Welcome back"
+               FontSize="24"
+               SemanticProperties.HeadingLevel="Level1" />
+
+        <Entry x:Name="EmailEntry"
+               Placeholder="Email" />
+
+        <!-- Deliberate violation: Description on Entry/Editor breaks Android
+             TalkBack edit actions.
+             Expected finding: MAUI_A11Y_006_ENTRY_DESCRIPTION_ANDROID -->
+        <Entry x:Name="PasswordEntry"
+               Placeholder="Password"
+               IsPassword="True"
+               SemanticProperties.Description="Enter your account password" />
+
+        <HorizontalStackLayout Spacing="8">
+            <!-- Deliberate violation: CheckBox with no describing label bound.
+                 Expected finding: MAUI_A11Y_010_CHECKBOX_NO_LABEL -->
+            <CheckBox x:Name="RememberMeCheck" />
+            <Label Text="Remember me" />
+        </HorizontalStackLayout>
+
+        <!-- Deliberate violation: Description does not contain the visible Text.
+             Expected finding: MAUI_A11Y_002_LABEL_IN_NAME -->
+        <Button Text="Log In"
+                Clicked="OnLoginClicked"
+                SemanticProperties.Description="Submit the login form and navigate to the dashboard" />
+
+    </VerticalStackLayout>
+</ContentPage>

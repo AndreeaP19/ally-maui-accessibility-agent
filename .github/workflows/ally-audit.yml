@@ -1,11 +1,11 @@
 name: Ally Accessibility Audit
 
-# Base branch resolution: this workflow diffs against .allyconfig.json's
-# defaultBaseBranch when set, falling back to the calling PR's actual target
-# branch otherwise. If this repo's PRs ever target a branch other than
-# defaultBaseBranch (e.g. a release branch), the diff will still be taken
-# against defaultBaseBranch — update it, or unset it to always follow the
-# PR's real target.
+# Base branch: this workflow always diffs against the PR's actual target
+# branch (github.event.pull_request.base.ref) — not .allyconfig.json's
+# defaultBaseBranch, which only affects local/manual `/ally diff`
+# invocations that omit [base-branch]. Using the PR's real target keeps
+# the diff correct even for repos where PRs sometimes target a branch
+# other than main (e.g. a release branch).
 
 on:
   workflow_call:
@@ -38,35 +38,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve base branch
-        id: base
-        run: |
-          CONFIG_BASE=""
-          if [ -f .allyconfig.json ]; then
-            CONFIG_BASE=$(jq -r '.defaultBaseBranch // empty' .allyconfig.json 2>/dev/null || true)
-          fi
-          if [ -n "$CONFIG_BASE" ]; then
-            CONFIG_BASE="${CONFIG_BASE#refs/heads/}"
-            CONFIG_BASE="${CONFIG_BASE#origin/}"
-            echo "Using defaultBaseBranch from .allyconfig.json: $CONFIG_BASE"
-            echo "base_ref=$CONFIG_BASE" >> "$GITHUB_OUTPUT"
-          else
-            PR_BASE_REF="${{ github.event.pull_request.base.ref }}"
-            PR_BASE_REF="${PR_BASE_REF#refs/heads/}"
-            PR_BASE_REF="${PR_BASE_REF#origin/}"
-            echo "No defaultBaseBranch in .allyconfig.json — using this PR's actual target branch."
-            echo "base_ref=$PR_BASE_REF" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Find changed XAML files
         id: diff
         env:
           XAML_GLOB: ${{ inputs.xaml-glob }}
-          BASE_REF: ${{ steps.base.outputs.base_ref }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          BASE_REF="${BASE_REF#refs/heads/}"
-          BASE_REF="${BASE_REF#origin/}"
-          git fetch origin "$BASE_REF" --depth=1
+          if [ -z "$BASE_REF" ]; then
+            echo "::error::BASE_REF is empty — this workflow requires a pull_request event (github.event.pull_request.base.ref was not set). Check that the caller workflow's 'on:' trigger includes pull_request."
+            exit 1
+          fi
+          # No --depth: a shallow fetch here can't be undone by a later
+          # plain re-fetch, and would break the merge-base diff below.
+          git fetch origin "$BASE_REF"
           CHANGED=$(git diff --name-only --diff-filter=ACMR "origin/$BASE_REF...HEAD" -- "$XAML_GLOB")
 
           if [ -z "$CHANGED" ]; then
@@ -96,7 +80,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.copilot-token || github.token }}
           ALLY_CHANGED_FILES: ${{ steps.diff.outputs.files }}
-          BASE_REF: ${{ steps.base.outputs.base_ref }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           printf '%s\n' \
             "Load the agent at .github/agents/ally.md and run /ally diff ${BASE_REF}." \
