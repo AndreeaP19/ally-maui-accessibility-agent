@@ -57,6 +57,10 @@ steps:
   - script: |
       set -e
       TARGET_BRANCH_NAME="${TARGET_BRANCH#refs/heads/}"
+      if [ -z "$TARGET_BRANCH_NAME" ]; then
+        echo "##vso[task.logissue type=error]TARGET_BRANCH_NAME is empty — this pipeline requires a pull request run (System.PullRequest.TargetBranch was not set). Check that this pipeline is configured with a 'pr:' trigger, not queued manually or via a branch/CI trigger."
+        exit 1
+      fi
       # No --depth: a shallow fetch here can't be undone by a later plain
       # re-fetch, and would break the merge-base diff below.
       git fetch origin "$TARGET_BRANCH_NAME"
