@@ -812,7 +812,11 @@ Default markdown. Optional on `/ally feedback` and `/ally diff`:
 ## Configuration — `.allyconfig.json`
 
 File: `.allyconfig.json` at the project root. Legacy files auto-migrate on
-first detection: `.accessibilityconfig.json`, `.accessibilityrc.json`.
+first detection: `.accessibilityconfig.json`, `.accessibilityrc.json`. Map
+their fields into the current schema below by meaning, not by assuming
+identical names — e.g. a legacy resource-file-path field becomes `resxPath`,
+a legacy namespace-alias field becomes `localizeNamespace`. If a legacy
+field's meaning is ambiguous, ask rather than guessing or dropping it.
 
 ```json
 {
