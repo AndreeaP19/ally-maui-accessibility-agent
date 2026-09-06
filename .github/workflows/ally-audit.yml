@@ -206,19 +206,16 @@ jobs:
             const summaryLine = order
               .map((tier) => `${icons[tier]} ${tier[0].toUpperCase() + tier.slice(1)}: ${counts[tier]}`)
               .join('   ');
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: total === 0
-                ? '## 🔍 Ally Accessibility Audit\n\n✅ No accessibility findings detected.'
-                : `## 🔍 Ally Accessibility Audit\n\nFindings by severity: ${summaryLine}`,
-            });
 
             const pull_number = context.issue.number;
             const commit_id = context.payload.pull_request.head.sha;
 
+            // Build one inline comment per finding, plus a plain-text version
+            // of each for the fallback path below.
             const blocks = report.split(/^###\s+FINDING:\s*/m).slice(1);
+            const inlineComments = [];
+            const unanchored = [];
+
             for (const block of blocks) {
               const titleLine = block.split(/\r?\n/, 1)[0].trim();
               const ruleId = (titleLine.match(/^([A-Z0-9_]+)/) || ['', titleLine])[1];
@@ -244,43 +241,86 @@ jobs:
                 ...(problem ? [`**The Problem:** ${problem}`, ''] : []),
                 ...(fix ? [`**Fix:**\n${fix}`] : []),
               ];
+              const body = [header, '', ...detailLines].join('\n');
 
-              // Try to anchor the comment inline, on the exact file/line the
-              // finding names — falls back to a plain issue comment (with
-              // the file:line spelled out) whenever that's not possible:
-              // no File row, an unparseable one, or a line GitHub's API
-              // rejects because it isn't part of this PR's diff (e.g. the
-              // agent reported a line outside the ±3-line hunk window it's
-              // supposed to stay within).
+              // Findings without a usable File row can't be anchored inline —
+              // fold those into the review's top-level summary instead.
               const fileMatch = (fields.File || '').match(/^(.+?):(\d+)(?:-\d+)?\s*$/);
-              let postedInline = false;
               if (fileMatch) {
                 const [, path, line] = fileMatch;
-                try {
-                  await github.rest.pulls.createReviewComment({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    pull_number,
-                    commit_id,
-                    path,
-                    line: parseInt(line, 10),
-                    side: 'RIGHT',
-                    body: [header, '', ...detailLines].join('\n'),
-                  });
-                  postedInline = true;
-                } catch (err) {
-                  core.warning(`Could not anchor ${ruleId} to ${fields.File}: ${err.message}`);
-                }
-              }
-
-              if (!postedInline) {
+                inlineComments.push({ ruleId, path, line: parseInt(line, 10), side: 'RIGHT', body });
+              } else {
                 const fileLine = fields.File ? [`**File:** ${fields.File}`, ''] : [];
+                unanchored.push([header, '', ...fileLine, ...detailLines].join('\n'));
+              }
+            }
+
+            const summaryHeader = total === 0
+              ? '## 🔍 Ally Accessibility Audit\n\n✅ No accessibility findings detected.'
+              : `## 🔍 Ally Accessibility Audit\n\nFindings by severity: ${summaryLine}`;
+            const reviewBody = unanchored.length > 0
+              ? `${summaryHeader}\n\n---\n\n**Findings that couldn't be anchored to a specific line:**\n\n${unanchored.join('\n\n---\n\n')}`
+              : summaryHeader;
+
+            if (inlineComments.length === 0) {
+              // Nothing to anchor (including the zero-findings case) — a
+              // plain issue comment is all a "review" would add here.
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: reviewBody,
+              });
+            } else {
+              // One review, submitted like a human reviewer would: a summary
+              // plus every finding as an inline comment on its own line —
+              // instead of either a flat issue comment or N separate
+              // single-comment "reviews" cluttering the PR timeline.
+              try {
+                await github.rest.pulls.createReview({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number,
+                  commit_id,
+                  event: 'COMMENT',
+                  body: reviewBody,
+                  comments: inlineComments.map(({ path, line, side, body }) => ({ path, line, side, body })),
+                });
+              } catch (err) {
+                // Most likely cause: at least one finding's line isn't part
+                // of this PR's diff, which createReview rejects for the
+                // whole batch rather than skipping just that comment. Fall
+                // back to posting each inline comment individually so one
+                // bad line doesn't sink every other finding.
+                core.warning(`createReview failed (${err.message}); falling back to individual review comments.`);
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: context.issue.number,
-                  body: [header, '', ...fileLine, ...detailLines].join('\n'),
+                  body: reviewBody,
                 });
+                for (const { ruleId, path, line, side, body } of inlineComments) {
+                  try {
+                    await github.rest.pulls.createReviewComment({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      pull_number,
+                      commit_id,
+                      path,
+                      line,
+                      side,
+                      body,
+                    });
+                  } catch (err2) {
+                    core.warning(`Could not anchor ${ruleId} to ${path}:${line}: ${err2.message}`);
+                    await github.rest.issues.createComment({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: context.issue.number,
+                      body: `**File:** ${path}:${line}\n\n${body}`,
+                    });
+                  }
+                }
               }
             }
 
