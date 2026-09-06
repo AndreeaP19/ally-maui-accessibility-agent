@@ -75,7 +75,7 @@ The wizard asks **one question at a time** and detects your `.resx` resource fil
 
 ## Running Ally in CI
 
-Ally can run in CI as a read-only check: it invokes `/ally diff` against the pull request's actual target branch, which reports findings only for changed hunks in the files a PR actually touches — not a full-repo `/ally feedback` pass. Both CI examples always use the PR's real target branch (from the platform's own PR metadata), not `.allyconfig.json`'s `defaultBaseBranch` — that field only matters for a local/manual `/ally diff` with no `[base-branch]` argument, so it stays correct even for repos where PRs sometimes target something other than `main` (e.g. a release branch). Findings are posted as a single PR review with one inline comment per finding, anchored to the exact file and line — not a flat comment dump — so each finding shows up next to the offending element in the diff view. `/ally apply` is deliberately left out of automation — the apply checkpoint's confirmation step is a safety feature, not a formality, and there's no one in CI to confirm it. Always run `/ally apply` manually, locally.
+Ally can run in CI as a read-only check: it invokes `/ally diff` against the pull request's actual target branch, which reports findings only for changed hunks in the files a PR actually touches — not a full-repo `/ally feedback` pass. It always uses the PR's real target branch (from the platform's own PR metadata), not `.allyconfig.json`'s `defaultBaseBranch` — that field only matters for a local/manual `/ally diff` with no `[base-branch]` argument, so it stays correct even for repos where PRs sometimes target something other than `main` (e.g. a release branch). Findings are posted as a single PR review with one inline comment per finding, anchored to the exact file and line — not a flat comment dump — so each finding shows up next to the offending element in the diff view. `/ally apply` is deliberately left out of automation — the apply checkpoint's confirmation step is a safety feature, not a formality, and there's no one in CI to confirm it. Always run `/ally apply` manually, locally.
 
 **The CI check still fails the gate on top of posting comments — this is intentional, not redundant.** The inline comments are for *visibility and actionability*: what's wrong, exactly where, and how to fix it. The failing check is what *enforces* the gate: nothing about a PR comment stops the PR from being merged unless a required status check backs it up, so if the check always passed, `failOn` would be purely decorative. Concretely: a finding's severity meeting or exceeding `failOn` fails the check even though the same finding is already visible as a comment. To change what's enforced, adjust `failOn` in `.allyconfig.json` (e.g. `"major"` to also block on major findings, or `"info"` to fail on any finding) — no workflow change needed, since the gate reads that value at run time.
 
@@ -89,13 +89,7 @@ Ally can run in CI as a read-only check: it invokes `/ally diff` against the pul
 4. **Auth:** the default `GITHUB_TOKEN` only works if the organization's Copilot policy allows "Allow use of Copilot CLI billed to the organization." Otherwise, create a PAT with the **Copilot Requests** permission and pass it via the optional reusable-workflow secret `copilot-token` (for example from a repository secret such as `COPILOT_GITHUB_TOKEN`).
 5. **Model selection:** by default, `copilot` uses your Copilot backend/org policy defaults. To pin a specific model for CI, pass it explicitly in the CLI command (for example `--model gpt-5.3-codex`).
 
-### Azure DevOps
-
-See [`examples/azure-devops/ally-audit-pipeline.yml`](examples/azure-devops/ally-audit-pipeline.yml).
-
-- **Auth** always requires a GitHub PAT — Copilot billing is GitHub-side regardless of which CI host runs the pipeline — stored as a secret pipeline variable.
-- **Model selection** defaults to your Copilot backend/org policy. To force a specific model in CI, add `--model <model-id>` to the `copilot` command (for example `--model gpt-5.3-codex`).
-- Enable **"Allow scripts to access the OAuth token"** on the pipeline and grant the **Build Service** identity **"Contribute to pull requests"**, or the PR comment step will fail.
+> Only GitHub Actions is supported for now. Azure DevOps support isn't currently maintained.
 
 ### Sample app (CI self-test)
 
@@ -284,7 +278,6 @@ After applying fixes, verify accessibility manually:
 examples/
   sample-app/             ← Minimal MAUI-style project used to self-test CI
   github-actions/         ← Caller workflow example for consuming repos
-  azure-devops/           ← Azure DevOps pipeline example
 .allyconfig.json          ← Config for auditing examples/sample-app/ in this repo
 README.md                 ← This file
 ```
