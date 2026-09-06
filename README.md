@@ -7,9 +7,10 @@
 ## Features
 
 - 🔍 **Automated XAML accessibility audits** — scans active files or entire projects
-- 🌐 **Localization-first** — all generated strings use `x:Static` bindings; never hardcoded values
+- 🌐 **Localization-first** — all generated strings use a markup-extension binding to the resource class; never hardcoded values
 - 🛡️ **WCAG 2.2 AA enforcement** — rule catalog covering critical blockers through informational notes
 - ⚙️ **Configurable** — `.allyconfig.json` controls resource paths, key naming, severity gates, and exclusions
+- 🧩 **Optional `maui-accessibility` skill integration** — treated as the semantics authority when installed; falls back to built-in rules if missing or erroring
 - ✅ **Confirmation-gated writes** — nothing is written until you explicitly approve the apply checkpoint
 - 🔕 **Suppressions** — inline or config-level, always requiring a reason
 
@@ -91,8 +92,9 @@ The wizard creates this file for you. A typical configuration looks like:
 
 ```json
 {
-  "resourceFile": "MyApp/Resources/AppResources.resx",
-  "namespaceAlias": "strings",
+  "localize": true,
+  "resxPath": "MyApp/Resources/AppResources.resx",
+  "localizeNamespace": "strings",
   "keyConvention": "Pascal_Underscore",
   "failOn": "critical",
   "excludePaths": ["MyApp/Platforms/", "MyApp/obj/"],
@@ -105,12 +107,20 @@ The wizard creates this file for you. A typical configuration looks like:
 
 | Field | Type | Description |
 |---|---|---|
-| `resourceFile` | string | Path to the `.resx` file used for accessibility string keys. |
-| `constantsFile` | string | *(Alternative to `resourceFile`)* Path to a constants file when `localize: false`. |
+| `resxPath` | string | Path to the `.resx` file used for accessibility string keys. |
+| `constantsFile` | string | Path to a constants file. Required (alongside `localize: false`) when the project has no `.resx` file; optional supplement otherwise. |
+| `constantsClassPath` | string | Fully-qualified class path for the constants class (e.g. `CoreConstants.TranslationKeys`), when `constantsFile` is set. |
 | `localize` | boolean | `false` disables `.resx` key generation and fires `MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` for any hardcoded accessibility strings. |
-| `namespaceAlias` | string | The `xmlns:` alias used to reference the resource class in XAML (e.g. `strings`). |
-| `keyConvention` | string | `"Pascal_Underscore"` or a custom template. |
+| `localizeNamespace` | string | The `xmlns:` alias used to reference the localization markup extension in XAML (e.g. `strings`). |
+| `keyPrefix` | string | Prefix applied to generated `.resx` keys (e.g. `A11y`). |
+| `placeholderValue` | string | Placeholder value written for new `.resx` entries until translated. Defaults to `"TODO: add translation"`. |
+| `headingDefaultLevel` | string | Default `SemanticProperties.HeadingLevel` suggested for section titles (e.g. `"Level1"`). |
+| `keyConvention` | string | `"Pascal_Underscore"`, `"SCREAMING_SNAKE"`, `"dot.notation"`, or `"custom"` (with a `keyTemplate`). |
+| `constConvention` | string | Naming convention for generated C# constants (e.g. `"PascalCase"`). |
+| `orderDetection` | boolean | Enables heuristic detection of reading-order mismatches (`MAUI_A11Y_003_READING_ORDER`). |
 | `failOn` | string | Minimum severity that fails a CI gate: `"critical"`, `"major"`, `"minor"`, or `"info"`. |
+| `mauiAccessibilitySkill` | object | Optional integration with a `maui-accessibility` skill: `enabled`, `skillName`, `required`, `fallbackOnMissing`, `fallbackOnError`. |
+| `rules` | object | Per-rule `enabled`/`severity` overrides, keyed by rule ID. |
 | `excludePaths` | string[] | Paths to skip entirely during scanning. |
 | `readOnlyPaths` | string[] | Paths that are reported but never written. |
 | `suppressions` | object[] | Rule suppressions with required `ruleId`, `path`, and `reason`. |
@@ -131,6 +141,22 @@ The wizard creates this file for you. A typical configuration looks like:
 | **High** | Included in proposed fixes; eligible for auto-apply |
 | **Medium** | Proposed but flagged "review recommended" |
 | **Low** | Reported only — never auto-applied |
+
+### Rule Catalog
+
+| Rule ID | Default Severity | Confidence | Description |
+|---|---|---|---|
+| `MAUI_A11Y_001_ICON_ONLY_TOOLBAR` | Critical | High | `ToolbarItem` / `ImageButton` has icon but no accessible name |
+| `MAUI_A11Y_002_LABEL_IN_NAME` | Major | High | Accessible name omits visible label text |
+| `MAUI_A11Y_003_READING_ORDER` | Major | Medium | Screen-reader order likely differs from visual order |
+| `MAUI_A11Y_004_INTERACTIVE_CONTAINER` | Critical | High | Gesture-only container may be the only way to act |
+| `MAUI_A11Y_005_MEANINGFUL_IMAGE_NO_DESCRIPTION` | Major | Medium | Meaningful image lacks alt text |
+| `MAUI_A11Y_006_ENTRY_DESCRIPTION_ANDROID` | Major | High | `Description` on `Entry`/`Editor` interferes with TalkBack |
+| `MAUI_A11Y_007_SLIDER_RANGE_MISSING` | Major | Medium | `Slider`/`Stepper` has no explicit range |
+| `MAUI_A11Y_008_HEADING_NOT_MARKED` | Minor | Low | Section title should have `HeadingLevel` |
+| `MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` | Minor | High | Accessibility text is hardcoded |
+| `MAUI_A11Y_010_CHECKBOX_NO_LABEL` | Major | High | `CheckBox`/`Switch`/`RadioButton` has no describing label |
+| `MAUI_A11Y_011_PICKER_TITLE_ONLY` | Major | Medium | `Picker` uses `Title` only; name may disappear after selection |
 
 ---
 
@@ -157,13 +183,14 @@ Nothing is written until you select **[A]** or **[B]**.
 
 ## Localization
 
-All generated accessibility strings are emitted as `x:Static` expressions:
+All generated accessibility strings are emitted through the configured
+localization markup extension (the `localizeNamespace` alias):
 
 ```xml
-SemanticProperties.Description="{x:Static strings:AppResources.A11y_NotesBtn_Description}"
+SemanticProperties.Description="{markupExtensions:Localize A11y_NotesBtn_Description}"
 ```
 
-New resource keys are added to the `.resx` file with the placeholder value `TODO: add translation`. The suggested English text appears in the audit report only — it is never committed to the `.resx` automatically.
+New resource keys are added to the `.resx` file with the placeholder value `TODO: add translation` (configurable via `placeholderValue`). The suggested English text appears in the audit report only — it is never committed to the `.resx` automatically.
 
 ---
 
@@ -203,6 +230,8 @@ The following rules are **always enforced** and cannot be overridden by confiden
 - **Icon-only controls** — `ToolbarItem` and `ImageButton` with no visible text must always have an accessible name.
 - **`SemanticProperties.IsInAccessibleTree` does not exist** — use `AutomationProperties.IsInAccessibleTree="False"` for single decorative elements, or `AutomationProperties.ExcludedWithChildren="True"` for decorative groups.
 - **`Placeholder` and `Hint`** — not combined blindly; they overlap on Android.
+- **Heading levels** — Windows/Narrator distinguishes `Level1`–`Level9`; Android/TalkBack and iOS/VoiceOver collapse them all to "heading."
+- **Dynamic announcements and focus** (`SemanticScreenReader.Announce(...)`, `SetSemanticFocus()`) are flow-dependent — Ally suggests them, but never adds them automatically.
 
 ---
 
