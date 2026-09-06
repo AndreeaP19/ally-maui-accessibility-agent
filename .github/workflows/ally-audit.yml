@@ -169,7 +169,7 @@ jobs:
             });
 
       - name: Fail if Ally errored
-        if: steps.diff.outputs.has_changes == 'true' && steps.ally.outputs.exit_code != '0'
+        if: steps.diff.outputs.has_changes == 'true' && steps.ally.outputs.exit_code != '' && steps.ally.outputs.exit_code != '0'
         env:
           ALLY_EXIT_CODE: ${{ steps.ally.outputs.exit_code }}
         run: |
