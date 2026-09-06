@@ -116,7 +116,10 @@ jobs:
             '.allyconfig.json only after confirming it exists at the repo root;' \
             'if it is missing, stop and report that the audit was skipped. Do not' \
             'write or modify any files. Output the full findings report as' \
-            'Markdown.' \
+            'Markdown, following the "Findings Report Format" contract in' \
+            'ally.md exactly (the FINDINGS_SUMMARY marker line and one' \
+            '"### FINDING: <RULE_ID>" block per finding) — CI parses it' \
+            'verbatim.' \
             '' \
             'Changed files:' \
             > ally-prompt.txt
@@ -134,87 +137,116 @@ jobs:
           copilot -p "$(cat ally-prompt.txt)" --allow-tool search/codebase > ally-report.md 2>&1
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
-      - name: Post individual findings as comments
+      - name: Post findings as PR comments
+        # Parses the exact "Findings Report Format" contract from ally.md
+        # (a FINDINGS_SUMMARY marker line, then one "### FINDING: <ID>"
+        # block per finding) — this is the one place both the per-finding
+        # comments and the severity gate below get their data, so they can
+        # never disagree with each other the way scraping the same report
+        # twice with two different heuristics used to.
         if: steps.diff.outputs.has_changes == 'true'
+        id: comments
         uses: actions/github-script@v7
         env:
           ALLY_REPORT_PATH: ally-report.md
           ALLY_EXIT_CODE: ${{ steps.ally.outputs.exit_code }}
+          ALLY_FAIL_ON: ${{ steps.ally.outputs.fail_on }}
         with:
           script: |
             const fs = require('fs');
             const report = fs.existsSync(process.env.ALLY_REPORT_PATH)
               ? fs.readFileSync(process.env.ALLY_REPORT_PATH, 'utf8')
               : '';
-             
+
             if (process.env.ALLY_EXIT_CODE && process.env.ALLY_EXIT_CODE !== '0') {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: `⚠️ Ally audit failed to run\n\n${report}`,
+                body: `## ⚠️ Ally audit failed to run\n\n${report}`,
               });
+              core.setOutput('should_fail', 'true');
               return;
             }
 
-            const severityIcons = { critical: '🔴', major: '🟠', minor: '🟡', info: '⚪' };
-            const findings = [];
-             
-            const lines = report.split(/\r?\n/);
-            let currentFinding = null;
-            let inFindingsSection = false;
+            const summaryMatch = report.match(
+              /<!--\s*FINDINGS_SUMMARY:\s*critical=(\d+)\s+major=(\d+)\s+minor=(\d+)\s+info=(\d+)\s*-->/
+            );
 
-            for (let i = 0; i < lines.length; i++) {
-              const line = lines[i];
-               
-              if (line.includes('Findings by severity') || line.match(/^#+\s+Findings/i)) {
-                inFindingsSection = true;
-                continue;
-              }
-
-              if (!inFindingsSection) continue;
-
-              const match = line.match(/^\d+\.\s+\*?\*?\[([A-Z0-9_]+)\]\*?\*?\s+\|\s+(🔴|🟠|🟡|⚪)\s+(\w+)\s+\|\s+(.+)/);
-              if (match) {
-                if (currentFinding) findings.push(currentFinding);
-                const [, ruleId, icon, severity, message] = match;
-                currentFinding = {
-                  ruleId,
-                  severity: severity.toLowerCase(),
-                  message,
-                  details: []
-                };
-              } else if (currentFinding && line.trim() && !line.match(/^(#+|---|[0-9]+\.|Findings)/)) {
-                currentFinding.details.push(line.trim());
-              } else if (!line.trim() && currentFinding && i > 0 && !lines[i - 1].match(/^\d+\./)) {
-                findings.push(currentFinding);
-                currentFinding = null;
-              }
-            }
-            if (currentFinding) findings.push(currentFinding);
-
-            if (findings.length === 0) {
+            if (!summaryMatch) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: '✅ No accessibility findings detected.',
+                body: '## ⚠️ Ally audit report could not be parsed\n\n' +
+                  "Ally's output didn't include the expected `FINDINGS_SUMMARY` marker " +
+                  '(see the "Findings Report Format" section of `.github/agents/ally.md`), ' +
+                  'so results can\'t be reliably posted or gated. Treating this as a failure ' +
+                  'rather than silently reporting "no findings."\n\n' +
+                  `<details><summary>Raw output</summary>\n\n\`\`\`\n${report}\n\`\`\`\n</details>`,
               });
+              core.setOutput('should_fail', 'true');
               return;
             }
 
-            for (const finding of findings) {
-              const icon = severityIcons[finding.severity] || '⚪';
-              const detailsText = finding.details.length > 0 ? '\n\n' + finding.details.join('\n') : '';
-              const body = `${icon} **${finding.ruleId}** (${finding.severity})\n\n${finding.message}${detailsText}`;
-               
+            const order = ['critical', 'major', 'minor', 'info'];
+            const icons = { critical: '🔴', major: '🟠', minor: '🟡', info: '⚪' };
+            const counts = {
+              critical: parseInt(summaryMatch[1], 10),
+              major: parseInt(summaryMatch[2], 10),
+              minor: parseInt(summaryMatch[3], 10),
+              info: parseInt(summaryMatch[4], 10),
+            };
+            const total = order.reduce((sum, tier) => sum + counts[tier], 0);
+
+            const summaryLine = order
+              .map((tier) => `${icons[tier]} ${tier[0].toUpperCase() + tier.slice(1)}: ${counts[tier]}`)
+              .join('   ');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: total === 0
+                ? '## 🔍 Ally Accessibility Audit\n\n✅ No accessibility findings detected.'
+                : `## 🔍 Ally Accessibility Audit\n\nFindings by severity: ${summaryLine}`,
+            });
+
+            const blocks = report.split(/^###\s+FINDING:\s*/m).slice(1);
+            for (const block of blocks) {
+              const blockLines = block.split(/\r?\n/);
+              const ruleId = blockLines[0].trim();
+              const fields = {};
+              for (const line of blockLines.slice(1)) {
+                const fieldMatch = line.match(/^(Severity|Confidence|File|Message|Suggested fix):\s*(.*)$/);
+                if (fieldMatch) fields[fieldMatch[1]] = fieldMatch[2].trim();
+              }
+
+              const severity = (fields.Severity || '').toLowerCase();
+              const icon = icons[severity] || '⚪';
+              const bodyLines = [
+                `${icon} **${ruleId}** (${fields.Severity || 'Unknown'}, ${fields.Confidence || 'unknown'} confidence)`,
+                '',
+              ];
+              if (fields.File) bodyLines.push(`**File:** ${fields.File}`);
+              if (fields.Message) bodyLines.push(`**Message:** ${fields.Message}`);
+              if (fields['Suggested fix']) bodyLines.push(`**Suggested fix:** ${fields['Suggested fix']}`);
+
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: body,
+                body: bodyLines.join('\n'),
               });
             }
+
+            const failOn = (process.env.ALLY_FAIL_ON || 'critical').toLowerCase();
+            const failOnIdx = order.indexOf(failOn);
+            const failingTiers = order
+              .slice(0, failOnIdx === -1 ? order.length : failOnIdx + 1)
+              .filter((tier) => counts[tier] > 0);
+
+            core.setOutput('should_fail', failingTiers.length > 0 ? 'true' : 'false');
+            core.setOutput('failing_tiers', failingTiers.join(', '));
 
       - name: Fail if Ally errored
         if: steps.diff.outputs.has_changes == 'true' && steps.ally.outputs.exit_code != '' && steps.ally.outputs.exit_code != '0'
@@ -225,30 +257,16 @@ jobs:
           exit 1
 
       - name: Fail on configured severity gate
-        if: steps.diff.outputs.has_changes == 'true' && steps.ally.outputs.exit_code == '0'
+        if: steps.diff.outputs.has_changes == 'true' && steps.ally.outputs.exit_code == '0' && steps.comments.outputs.should_fail == 'true'
         env:
-          ALLY_FAIL_ON: ${{ steps.ally.outputs.fail_on }}
+          FAILING_TIERS: ${{ steps.comments.outputs.failing_tiers }}
         run: |
-          node - <<'NODE'
-          const fs = require('fs');
-          const reportPath = 'ally-report.md';
-          const failOn = (process.env.ALLY_FAIL_ON || 'critical').toLowerCase();
-           
-          if (!fs.existsSync(reportPath)) {
-            console.log('No report file found, skipping severity gate.');
-            process.exit(0);
-          }
-
-          const text = fs.readFileSync(reportPath, 'utf8');
-          const hasCritical = /\bcritical\b/i.test(text);
-
-          if (hasCritical) {
-            console.error('::error::Critical accessibility findings detected — PR cannot be merged.');
-            process.exit(1);
-          }
-
-          console.log('No critical findings detected.');
-          NODE
+          if [ -n "$FAILING_TIERS" ]; then
+            echo "::error::Accessibility findings at or above the configured failOn threshold ($FAILING_TIERS) — PR cannot be merged."
+          else
+            echo "::error::Ally's report could not be parsed — see the PR comment for details."
+          fi
+          exit 1
 
       - name: No XAML changes
         if: steps.fork-check.outputs.is_fork != 'true' && steps.diff.outputs.has_changes != 'true'

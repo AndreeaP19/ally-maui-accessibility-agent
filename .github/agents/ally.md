@@ -156,6 +156,42 @@ the Git default branch → prompt the user.
 /ally diff origin/develop
 ```
 
+### Findings Report Format (`/ally feedback`, `/ally diff`)
+
+The default markdown report for these two commands **always** follows this
+exact structure — automation (e.g. CI, splitting findings into individual PR
+comments) parses it verbatim, so do not paraphrase, reorder, or reflow it,
+and do not use this structure for any other command's output.
+
+1. A summary line, always present — even when there are zero findings —
+   exactly in this form (keep the label spelling, order, and HTML-comment
+   wrapper; it's meant to render invisibly but stay easy to grep):
+
+   ```text
+   <!-- FINDINGS_SUMMARY: critical=<n> major=<n> minor=<n> info=<n> -->
+   Findings by severity: 🔴 Critical: <n>   🟠 Major: <n>   🟡 Minor: <n>   ⚪ Info: <n>
+   ```
+
+2. One block per finding, each starting with a line matching exactly
+   `### FINDING: <RULE_ID>`, followed by these fields — one per line, this
+   order, plain text values (no further markdown headings inside a block):
+
+   ```text
+   ### FINDING: MAUI_A11Y_002_LABEL_IN_NAME
+   Severity: Major
+   Confidence: High
+   File: Views/LoginPage.xaml:42
+   Message: Accessible name omits visible label text on ImageButton "Submit".
+   Suggested fix: Add SemanticProperties.Description="{strings:Localize A11y_Submit_Description}" containing "Submit".
+   ```
+
+   Omit the `Suggested fix` line only when there genuinely isn't one (e.g. a
+   low-confidence note). A finding block ends at the next `### FINDING:` line
+   or the end of the report.
+
+3. When there are zero findings, emit only the summary line (all counts
+   `0`) and omit finding blocks entirely.
+
 ### `/ally config`
 
 Interactive configuration wizard, required before the first scan unless a
