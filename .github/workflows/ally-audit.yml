@@ -66,16 +66,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.copilot-token || secrets.GITHUB_TOKEN }}
           ALLY_CHANGED_FILES: ${{ steps.diff.outputs.files }}
         run: |
-          cat > ally-prompt.txt <<'ALLY_PROMPT_EOF'
-          Load the agent at .github/agents/ally.md and run /ally feedback.
-          Restrict the audit to only the changed files listed below. Respect
-          .allyconfig.json only after confirming it exists at the repo root;
-          if it is missing, stop and report that the audit was skipped. Do not
-          write or modify any files. Output the full findings report as
-          Markdown.
-
-          Changed files:
-          ALLY_PROMPT_EOF
+          printf '%s\n' \
+            'Load the agent at .github/agents/ally.md and run /ally feedback.' \
+            'Restrict the audit to only the changed files listed below. Respect' \
+            '.allyconfig.json only after confirming it exists at the repo root;' \
+            'if it is missing, stop and report that the audit was skipped. Do not' \
+            'write or modify any files. Output the full findings report as' \
+            'Markdown.' \
+            '' \
+            'Changed files:' \
+            > ally-prompt.txt
           echo "$ALLY_CHANGED_FILES" >> ally-prompt.txt
 
           copilot -p "Load the agent at .github/agents/ally.md and run /ally feedback using the attached scope file." --attachment ally-prompt.txt --allow-tool search/codebase > ally-report.md

@@ -90,12 +90,18 @@ steps:
         REPORT_JSON=$(python3 -c "import json; print(json.dumps('Ally produced no output.'))")
       fi
 
+      CURL_CONFIG="$(mktemp)"
+      trap 'rm -f "$CURL_CONFIG"' EXIT
+      {
+        echo "user = \":$SYSTEM_ACCESSTOKEN\""
+        echo "header = \"Content-Type: application/json\""
+        echo "data = @-"
+        echo "request = POST"
+        echo "url = \"$(System.CollectionUri)$(System.TeamProject)/_apis/git/repositories/$(Build.Repository.Name)/pullRequests/$(System.PullRequest.PullRequestId)/threads?api-version=7.1\""
+      } > "$CURL_CONFIG"
+
       printf '{"comments":[{"parentCommentId":0,"content":%s,"commentType":1}],"status":1}' "$REPORT_JSON" | \
-      curl -sS -f -u ":$SYSTEM_ACCESSTOKEN" \
-        -H "Content-Type: application/json" \
-        -X POST \
-        --data @- \
-        "$(System.CollectionUri)$(System.TeamProject)/_apis/git/repositories/$(Build.Repository.Name)/pullRequests/$(System.PullRequest.PullRequestId)/threads?api-version=7.1"
+      curl -sS -f --config "$CURL_CONFIG"
     displayName: "Post PR comment"
     condition: eq(variables.hasChanges, 'true')
     env:
