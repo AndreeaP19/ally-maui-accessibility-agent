@@ -2,9 +2,10 @@ name: Sample App Accessibility Audit
 
 # Exercises the reusable Ally workflow against the sample app in this repo,
 # so the CI integration itself gets validated by a real PR check on every
-# change that could affect it — not just documented in examples/. Requires
-# a repository secret named COPILOT_GITHUB_TOKEN (see the "Running Ally in
-# CI" section of README.md).
+# change that could affect it — not just documented in examples/. This job
+# relies on the automatic GITHUB_TOKEN when the workflow requests
+# copilot-requests: write (see the "Running Ally in CI" section of
+# README.md).
 
 on:
   pull_request:
