@@ -38,7 +38,27 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check for fork PR
+        # GitHub forces GITHUB_TOKEN to read-only and withholds repository
+        # secrets entirely for pull_request runs from a fork, regardless of
+        # this workflow's own `permissions:` or a caller's grant — so a fork
+        # PR would otherwise fail late, at the "Post PR comment" step, with a
+        # confusing 403. Skip gracefully here instead. (Not fixed by
+        # switching to pull_request_target: that grants secrets to whatever
+        # code the fork's PR checks out, which is a worse problem to have.)
+        id: fork-check
+        env:
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+        run: |
+          if [ "$HEAD_REPO" != "$BASE_REPO" ]; then
+            echo "is_fork=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_fork=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Find changed XAML files
+        if: steps.fork-check.outputs.is_fork != 'true'
         id: diff
         env:
           XAML_GLOB: ${{ inputs.xaml-glob }}
@@ -120,7 +140,16 @@ jobs:
             });
 
       - name: No XAML changes
-        if: steps.diff.outputs.has_changes != 'true'
+        if: steps.fork-check.outputs.is_fork != 'true' && steps.diff.outputs.has_changes != 'true'
         env:
           XAML_GLOB: ${{ inputs.xaml-glob }}
         run: echo "No files matching \"$XAML_GLOB\" changed in this PR — skipping audit."
+
+      - name: Fork PR — skipping audit
+        if: steps.fork-check.outputs.is_fork == 'true'
+        run: |
+          echo "This PR is from a fork. GitHub withholds write permissions and"
+          echo "repository secrets from pull_request runs triggered by forks, so"
+          echo "Ally can't post a PR comment here. Run '/ally diff' locally, or"
+          echo "have a maintainer re-run this check after the changes land on a"
+          echo "branch of this repository."
