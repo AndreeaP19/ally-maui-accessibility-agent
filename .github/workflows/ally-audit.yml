@@ -15,17 +15,14 @@ on:
         required: false
         type: string
         default: "**/*.xaml"
-    secrets:
-      copilot-token:
-        description: >
-          GitHub PAT with the "Copilot Requests" permission. Required unless the
-          calling repo's organization allows GITHUB_TOKEN to bill Copilot CLI usage
-          to the organization, in which case this can be omitted.
-        required: false
 
+# copilot-requests: write lets the Copilot CLI authenticate with this job's
+# own automatic GITHUB_TOKEN — no PAT/secret needed (see the "Running Ally
+# in CI" section of README.md).
 permissions:
   contents: read
   pull-requests: write
+  copilot-requests: write
 
 jobs:
   ally-audit:
@@ -106,46 +103,268 @@ jobs:
         if: steps.diff.outputs.has_changes == 'true'
         id: ally
         env:
-          GITHUB_TOKEN: ${{ secrets.copilot-token || github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
           ALLY_CHANGED_FILES: ${{ steps.diff.outputs.files }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           printf '%s\n' \
             "Load the agent at .github/agents/ally.md and run /ally diff ${BASE_REF}." \
-            'The files changed relative to that base branch are attached below —' \
+            'The files changed relative to that base branch are listed below —' \
             'use exactly this list as the diff scope; do not run git yourself to' \
             'recompute it. Restrict reported findings to changed hunks (±3 lines)' \
             'within these files, per the /ally diff command definition. Respect' \
             '.allyconfig.json only after confirming it exists at the repo root;' \
             'if it is missing, stop and report that the audit was skipped. Do not' \
-            'write or modify any files. Output the full findings report as' \
-            'Markdown.' \
+            'write or modify any files. Read every file in scope in full with' \
+            'your own tool before reporting anything about it — never rely on' \
+            'the filename or a typical file of this kind; every "Element" quote' \
+            'in your report must be verbatim from what you actually read, per' \
+            'the Hard rules in ally.md. Output the full findings report as' \
+            'Markdown, following the "Findings Report Format" contract in' \
+            'ally.md exactly (the FINDINGS_SUMMARY marker line and one' \
+            '"### FINDING: <RULE_ID>" block per finding) — CI parses it' \
+            'verbatim.' \
             '' \
             'Changed files:' \
             > ally-prompt.txt
           echo "$ALLY_CHANGED_FILES" >> ally-prompt.txt
 
-          copilot -p "Load the agent at .github/agents/ally.md and run /ally diff using the attached scope file." --attachment ally-prompt.txt --allow-tool search/codebase > ally-report.md
+          FAIL_ON=$(node -e "const fs=require('fs');const p='.allyconfig.json';if(!fs.existsSync(p)){console.error('::error::.allyconfig.json is missing at repo root.');process.exit(1);}let cfg;try{cfg=JSON.parse(fs.readFileSync(p,'utf8'));}catch(e){console.error('::error::Failed to parse .allyconfig.json as JSON.');process.exit(1);}const allowed=['critical','major','minor','info'];const v=String(cfg.failOn||'').toLowerCase();if(!allowed.includes(v)){console.error('::error::.allyconfig.json failOn must be one of: critical, major, minor, info.');process.exit(1);}process.stdout.write(v);")
+          echo "fail_on=$FAIL_ON" >> "$GITHUB_OUTPUT"
 
-      - name: Post PR comment
+          # Don't let a Copilot CLI failure (e.g. an invalid/missing token)
+          # abort the job here — the "Post PR comment" step below still needs
+          # to run so the failure is reported on the PR itself, not just
+          # buried in Actions logs. "Fail if Ally errored" at the end of this
+          # job restores the red X once that comment has been posted.
+          set +e
+          copilot -p "$(cat ally-prompt.txt)" --allow-tool search/codebase > ally-report.md 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Post findings as PR comments
+        # Parses the exact "Findings Report Format" contract from ally.md
+        # (a FINDINGS_SUMMARY marker line, then one "### FINDING: <ID>"
+        # block per finding) — this is the one place both the per-finding
+        # comments and the severity gate below get their data, so they can
+        # never disagree with each other the way scraping the same report
+        # twice with two different heuristics used to.
         if: steps.diff.outputs.has_changes == 'true'
+        id: comments
         uses: actions/github-script@v7
         env:
           ALLY_REPORT_PATH: ally-report.md
+          ALLY_EXIT_CODE: ${{ steps.ally.outputs.exit_code }}
+          ALLY_FAIL_ON: ${{ steps.ally.outputs.fail_on }}
         with:
           script: |
             const fs = require('fs');
-            const path = process.env.ALLY_REPORT_PATH;
-            const report = fs.existsSync(path)
-              ? fs.readFileSync(path, 'utf8')
-              : 'Ally produced no output.';
+            const report = fs.existsSync(process.env.ALLY_REPORT_PATH)
+              ? fs.readFileSync(process.env.ALLY_REPORT_PATH, 'utf8')
+              : '';
+
+            if (process.env.ALLY_EXIT_CODE && process.env.ALLY_EXIT_CODE !== '0') {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `## ⚠️ Ally audit failed to run\n\n${report}`,
+              });
+              core.setOutput('should_fail', 'true');
+              return;
+            }
+
+            const summaryMatch = report.match(
+              /<!--\s*FINDINGS_SUMMARY:\s*critical=(\d+)\s+major=(\d+)\s+minor=(\d+)\s+info=(\d+)\s*-->/
+            );
+
+            if (!summaryMatch) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: '## ⚠️ Ally audit report could not be parsed\n\n' +
+                  "Ally's output didn't include the expected `FINDINGS_SUMMARY` marker " +
+                  '(see the "Findings Report Format" section of `.github/agents/ally.md`), ' +
+                  'so results can\'t be reliably posted or gated. Treating this as a failure ' +
+                  'rather than silently reporting "no findings."\n\n' +
+                  `<details><summary>Raw output</summary>\n\n\`\`\`\n${report}\n\`\`\`\n</details>`,
+              });
+              core.setOutput('should_fail', 'true');
+              return;
+            }
+
+            const order = ['critical', 'major', 'minor', 'info'];
+            const icons = { critical: '🔴', major: '🟠', minor: '🟡', info: '⚪' };
+            const counts = {
+              critical: parseInt(summaryMatch[1], 10),
+              major: parseInt(summaryMatch[2], 10),
+              minor: parseInt(summaryMatch[3], 10),
+              info: parseInt(summaryMatch[4], 10),
+            };
+            const total = order.reduce((sum, tier) => sum + counts[tier], 0);
+
+            const summaryLine = order
+              .map((tier) => `${icons[tier]} ${tier[0].toUpperCase() + tier.slice(1)}: ${counts[tier]}`)
+              .join('   ');
+
+            const pull_number = context.issue.number;
+            const commit_id = context.payload.pull_request.head.sha;
+
+            // Build one inline comment per finding, plus a plain-text version
+            // of each for the fallback path below.
+            const blocks = report.split(/^###\s+FINDING:\s*/m).slice(1);
+            const inlineComments = [];
+            const unanchored = [];
+
+            for (const block of blocks) {
+              const titleLine = block.split(/\r?\n/, 1)[0].trim();
+              const ruleId = (titleLine.match(/^([A-Z0-9_]+)/) || ['', titleLine])[1];
+
+              const fields = {};
+              for (const rowMatch of block.matchAll(/^\|\s*([^|\n]+?)\s*\|\s*([^|\n]+?)\s*\|\s*$/gm)) {
+                const key = rowMatch[1].trim();
+                if (key.toLowerCase() === 'property' || /^-+$/.test(key)) continue;
+                fields[key] = rowMatch[2].trim();
+              }
+
+              const problemMatch = block.match(/\*\*The Problem:\*\*\s*([\s\S]*?)(?=\n\*\*Fix:\*\*|$)/);
+              const fixMatch = block.match(/\*\*Fix:\*\*\s*([\s\S]*)$/);
+              const problem = problemMatch ? problemMatch[1].trim() : '';
+              const fix = fixMatch ? fixMatch[1].trim() : '';
+
+              const severity = (fields.Severity || '').replace(/[^a-z]/gi, '').toLowerCase();
+              const icon = icons[severity] || '⚪';
+              const header = `${icon} **${titleLine}** (${fields.Confidence || 'unknown'} confidence)`;
+              const elementLine = fields.Element ? [`> ${fields.Element}`, ''] : [];
+              const detailLines = [
+                ...elementLine,
+                ...(problem ? [`**The Problem:** ${problem}`, ''] : []),
+                ...(fix ? [`**Fix:**\n${fix}`] : []),
+              ];
+              const body = [header, '', ...detailLines].join('\n');
+
+              // Findings without a usable File row can't be anchored inline —
+              // fold those into the review's top-level summary instead.
+              const fileMatch = (fields.File || '').match(/^(.+?):(\d+)(?:-\d+)?\s*$/);
+              if (fileMatch) {
+                const [, path, line] = fileMatch;
+                inlineComments.push({ ruleId, path, line: parseInt(line, 10), side: 'RIGHT', body });
+              } else {
+                const fileLine = fields.File ? [`**File:** ${fields.File}`, ''] : [];
+                unanchored.push([header, '', ...fileLine, ...detailLines].join('\n'));
+              }
+            }
+
+            // The summary comment is just this — nothing else. Everything
+            // else (inline findings, and any that couldn't be anchored to a
+            // line) belongs to the review below, not this comment.
+            const summaryBody = total === 0
+              ? '## 🔍 Ally Accessibility Audit\n\n✅ No accessibility findings detected.'
+              : `## 🔍 Ally Accessibility Audit\n\nFindings by severity: ${summaryLine}`;
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `## 🔍 Ally Accessibility Audit\n\n${report}`,
+              body: summaryBody,
             });
+
+            if (total > 0) {
+              // One review, submitted like a human reviewer would: every
+              // finding as an inline comment on its own line — instead of
+              // either a flat issue comment or N separate single-comment
+              // "reviews" cluttering the PR timeline. Findings that
+              // couldn't be anchored to a line go in the review body
+              // instead, rather than padding out the summary comment above.
+              const reviewBodyParts = [];
+              if (inlineComments.length > 0) {
+                reviewBodyParts.push(`Ally posted ${inlineComments.length} inline comment(s) below.`);
+              }
+              if (unanchored.length > 0) {
+                reviewBodyParts.push(
+                  `**Findings that couldn't be anchored to a specific line:**\n\n${unanchored.join('\n\n---\n\n')}`
+                );
+              }
+              const reviewBody = reviewBodyParts.join('\n\n---\n\n');
+
+              try {
+                await github.rest.pulls.createReview({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number,
+                  commit_id,
+                  event: 'COMMENT',
+                  body: reviewBody,
+                  comments: inlineComments.map(({ path, line, side, body }) => ({ path, line, side, body })),
+                });
+              } catch (err) {
+                // Most likely cause: at least one finding's line isn't part
+                // of this PR's diff, which createReview rejects for the
+                // whole batch rather than skipping just that comment. Fall
+                // back to posting each inline comment individually so one
+                // bad line doesn't sink every other finding.
+                core.warning(`createReview failed (${err.message}); falling back to individual review comments.`);
+                if (unanchored.length > 0) {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: context.issue.number,
+                    body: `**Findings that couldn't be anchored to a specific line:**\n\n${unanchored.join('\n\n---\n\n')}`,
+                  });
+                }
+                for (const { ruleId, path, line, side, body } of inlineComments) {
+                  try {
+                    await github.rest.pulls.createReviewComment({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      pull_number,
+                      commit_id,
+                      path,
+                      line,
+                      side,
+                      body,
+                    });
+                  } catch (err2) {
+                    core.warning(`Could not anchor ${ruleId} to ${path}:${line}: ${err2.message}`);
+                    await github.rest.issues.createComment({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: context.issue.number,
+                      body: `**File:** ${path}:${line}\n\n${body}`,
+                    });
+                  }
+                }
+              }
+            }
+
+            const failOn = (process.env.ALLY_FAIL_ON || 'critical').toLowerCase();
+            const failOnIdx = order.indexOf(failOn);
+            const failingTiers = order
+              .slice(0, failOnIdx === -1 ? order.length : failOnIdx + 1)
+              .filter((tier) => counts[tier] > 0);
+
+            core.setOutput('should_fail', failingTiers.length > 0 ? 'true' : 'false');
+            core.setOutput('failing_tiers', failingTiers.join(', '));
+
+      - name: Fail if Ally errored
+        if: steps.diff.outputs.has_changes == 'true' && steps.ally.outputs.exit_code != '' && steps.ally.outputs.exit_code != '0'
+        env:
+          ALLY_EXIT_CODE: ${{ steps.ally.outputs.exit_code }}
+        run: |
+          echo "::error::Ally CLI exited with code $ALLY_EXIT_CODE — see the PR comment for details."
+          exit 1
+
+      - name: Fail on configured severity gate
+        if: steps.diff.outputs.has_changes == 'true' && steps.ally.outputs.exit_code == '0' && steps.comments.outputs.should_fail == 'true'
+        env:
+          FAILING_TIERS: ${{ steps.comments.outputs.failing_tiers }}
+        run: |
+          if [ -n "$FAILING_TIERS" ]; then
+            echo "::error::Accessibility findings at or above the configured failOn threshold ($FAILING_TIERS) — PR cannot be merged."
+          else
+            echo "::error::Ally's report could not be parsed — see the PR comment for details."
+          fi
+          exit 1
 
       - name: No XAML changes
         if: steps.fork-check.outputs.is_fork != 'true' && steps.diff.outputs.has_changes != 'true'

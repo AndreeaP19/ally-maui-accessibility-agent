@@ -97,6 +97,9 @@ steps:
         cat changed-files.txt
       } > ally-prompt.txt
 
+      FAIL_ON=$(node -e "const fs=require('fs');const p='.allyconfig.json';if(!fs.existsSync(p)){console.error('##vso[task.logissue type=error].allyconfig.json is missing at repo root.');process.exit(1);}let cfg;try{cfg=JSON.parse(fs.readFileSync(p,'utf8'));}catch(e){console.error('##vso[task.logissue type=error]Failed to parse .allyconfig.json as JSON.');process.exit(1);}const allowed=['critical','major','minor','info'];const v=String(cfg.failOn||'').toLowerCase();if(!allowed.includes(v)){console.error('##vso[task.logissue type=error].allyconfig.json failOn must be one of: critical, major, minor, info.');process.exit(1);}process.stdout.write(v);")
+      echo "##vso[task.setvariable variable=failOn]$FAIL_ON"
+
       if ! copilot -p "Load the agent at .github/agents/ally.md and run /ally diff using the attached scope file." --attachment ally-prompt.txt --allow-tool search/codebase > ally-report.md; then
         printf '%s\n' 'Ally produced no output.' > ally-report.md
       fi
@@ -108,27 +111,131 @@ steps:
       TARGET_BRANCH_NAME: $(targetBranchName)
 
   - script: |
-      set -e
-      if [ -f ally-report.md ]; then
-        REPORT_JSON=$(python3 -c "import json; print(json.dumps(open('ally-report.md').read()))")
-      else
-        REPORT_JSON=$(python3 -c "import json; print(json.dumps('Ally produced no output.'))")
-      fi
+      node - <<'NODE'
+      const fs = require('fs');
+       
+      if (!fs.existsSync('ally-report.md')) {
+        fs.writeFileSync('findings.json', JSON.stringify([], null, 2));
+        process.exit(0);
+      }
 
-      CURL_CONFIG="$(mktemp)"
-      trap 'rm -f "$CURL_CONFIG"' EXIT
-      {
-        echo "user = \":$SYSTEM_ACCESSTOKEN\""
-        echo "header = \"Content-Type: application/json\""
-        echo "data = @-"
-        echo "request = POST"
-        echo "url = \"$(System.CollectionUri)$(System.TeamProject)/_apis/git/repositories/$(Build.Repository.Name)/pullRequests/$(System.PullRequest.PullRequestId)/threads?api-version=7.1\""
-      } > "$CURL_CONFIG"
+      const report = fs.readFileSync('ally-report.md', 'utf8');
+      const severityIcons = { critical: '🔴', major: '🟠', minor: '🟡', info: '⚪' };
+      const findings = [];
+       
+      const lines = report.split(/\r?\n/);
+      let currentFinding = null;
+      let inFindingsSection = false;
 
-      BODY="{\"comments\":[{\"parentCommentId\":0,\"content\":$REPORT_JSON,\"commentType\":1}],\"status\":1}"
-      printf '%s' "$BODY" | \
-      curl -sS -f --config "$CURL_CONFIG"
-    displayName: "Post PR comment"
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+         
+        if (line.includes('Findings by severity') || line.match(/^#+\s+Findings/i)) {
+          inFindingsSection = true;
+          continue;
+        }
+
+        if (!inFindingsSection) continue;
+
+        const match = line.match(/^\d+\.\s+\*?\*?\[([A-Z0-9_]+)\]\*?\*?\s+\|\s+(🔴|🟠|🟡|⚪)\s+(\w+)\s+\|\s+(.+)/);
+        if (match) {
+          if (currentFinding) findings.push(currentFinding);
+          const [, ruleId, icon, severity, message] = match;
+          currentFinding = {
+            ruleId,
+            severity: severity.toLowerCase(),
+            message,
+            details: []
+          };
+        } else if (currentFinding && line.trim() && !line.match(/^(#+|---|[0-9]+\.|Findings)/)) {
+          currentFinding.details.push(line.trim());
+        } else if (!line.trim() && currentFinding && i > 0 && !lines[i - 1].match(/^\d+\./)) {
+          findings.push(currentFinding);
+          currentFinding = null;
+        }
+      }
+      if (currentFinding) findings.push(currentFinding);
+
+      fs.writeFileSync('findings.json', JSON.stringify(findings, null, 2));
+      NODE
+    displayName: "Parse findings into JSON"
+    condition: eq(variables.hasChanges, 'true')
+
+  - script: |
+      node - <<'NODE'
+      const fs = require('fs');
+      const axios = require('axios');
+
+      if (!fs.existsSync('findings.json')) {
+        console.log('No findings file found');
+        process.exit(0);
+      }
+
+      const findings = JSON.parse(fs.readFileSync('findings.json', 'utf8'));
+      if (findings.length === 0) {
+        const baseUrl = '$(System.CollectionUri)$(System.TeamProject)/_apis/git/repositories/$(Build.Repository.Name)/pullRequests/$(System.PullRequest.PullRequestId)';
+        const token = process.env.SYSTEM_ACCESSTOKEN;
+        const threadBody = {
+          comments: [{ parentCommentId: 0, content: '✅ No accessibility findings detected.', commentType: 1 }],
+          status: 1
+        };
+
+        axios.post(`${baseUrl}/threads?api-version=7.1`, threadBody, {
+          auth: { username: '', password: token }
+        }).catch(e => console.error('Failed to post:', e.message));
+        process.exit(0);
+      }
+
+      const severityIcons = { critical: '🔴', major: '🟠', minor: '🟡', info: '⚪' };
+      const baseUrl = '$(System.CollectionUri)$(System.TeamProject)/_apis/git/repositories/$(Build.Repository.Name)/pullRequests/$(System.PullRequest.PullRequestId)';
+      const token = process.env.SYSTEM_ACCESSTOKEN;
+
+      (async () => {
+        for (const finding of findings) {
+          const icon = severityIcons[finding.severity] || '⚪';
+          const detailsText = finding.details.length > 0 ? '\n\n' + finding.details.join('\n') : '';
+          const body = `${icon} **${finding.ruleId}** (${finding.severity})\n\n${finding.message}${detailsText}`;
+           
+          const threadBody = {
+            comments: [{ parentCommentId: 0, content: body, commentType: 1 }],
+            status: 1
+          };
+
+          try {
+            await axios.post(`${baseUrl}/threads?api-version=7.1`, threadBody, {
+              auth: { username: '', password: token }
+            });
+          } catch (e) {
+            console.error(`Failed to post finding ${finding.ruleId}:`, e.message);
+          }
+        }
+      })();
+      NODE
+    displayName: "Post individual findings as comments"
     condition: eq(variables.hasChanges, 'true')
     env:
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+  - script: |
+      set -e
+      node - <<'NODE'
+      const fs = require('fs');
+      const reportPath = 'ally-report.md';
+       
+      if (!fs.existsSync(reportPath)) {
+        console.log('No report file found, skipping severity gate.');
+        process.exit(0);
+      }
+
+      const text = fs.readFileSync(reportPath, 'utf8');
+      const hasCritical = /\bcritical\b/i.test(text);
+
+      if (hasCritical) {
+        console.error('##vso[task.logissue type=error]Critical accessibility findings detected — PR cannot be merged.');
+        process.exit(1);
+      }
+
+      console.log('No critical findings detected.');
+      NODE
+    displayName: "Fail on critical findings"
+    condition: eq(variables.hasChanges, 'true')

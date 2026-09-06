@@ -40,5 +40,11 @@
                 Clicked="OnLoginClicked"
                 SemanticProperties.Description="Submit the login form and navigate to the dashboard" />
 
+        <!-- Deliberate violation: Description does not contain the visible Text.
+             Expected finding: MAUI_A11Y_002_LABEL_IN_NAME -->
+        <Button Text="Forgot Password?"
+                Clicked="OnForgotPasswordTapped"
+                SemanticProperties.Description="Send a password reset link to your email" />
+
     </VerticalStackLayout>
 </ContentPage>
