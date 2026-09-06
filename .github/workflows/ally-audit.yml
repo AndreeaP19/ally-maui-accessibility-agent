@@ -51,7 +51,15 @@ jobs:
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           BASE_REPO: ${{ github.repository }}
         run: |
-          if [ "$HEAD_REPO" != "$BASE_REPO" ]; then
+          # An empty HEAD_REPO means github.event.pull_request is absent
+          # entirely (this run wasn't triggered by a pull_request event at
+          # all) — that's not a fork, it's a caller misconfiguration, and
+          # the "Find changed XAML files" step below already reports that
+          # case clearly via its own BASE_REF check. Only treat this as a
+          # fork when we actually have a head repo and it differs.
+          if [ -z "$HEAD_REPO" ]; then
+            echo "is_fork=false" >> "$GITHUB_OUTPUT"
+          elif [ "$HEAD_REPO" != "$BASE_REPO" ]; then
             echo "is_fork=true" >> "$GITHUB_OUTPUT"
           else
             echo "is_fork=false" >> "$GITHUB_OUTPUT"
