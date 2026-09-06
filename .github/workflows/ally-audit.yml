@@ -125,13 +125,21 @@ jobs:
             > ally-prompt.txt
           echo "$ALLY_CHANGED_FILES" >> ally-prompt.txt
 
-          copilot -p "$(cat ally-prompt.txt)" --allow-tool search/codebase > ally-report.md
+          # Don't let a Copilot CLI failure (e.g. an invalid/missing token)
+          # abort the job here — the "Post PR comment" step below still needs
+          # to run so the failure is reported on the PR itself, not just
+          # buried in Actions logs. "Fail if Ally errored" at the end of this
+          # job restores the red X once that comment has been posted.
+          set +e
+          copilot -p "$(cat ally-prompt.txt)" --allow-tool search/codebase > ally-report.md 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
       - name: Post PR comment
         if: steps.diff.outputs.has_changes == 'true'
         uses: actions/github-script@v7
         env:
           ALLY_REPORT_PATH: ally-report.md
+          ALLY_EXIT_CODE: ${{ steps.ally.outputs.exit_code }}
         with:
           script: |
             const fs = require('fs');
@@ -139,13 +147,38 @@ jobs:
             const report = fs.existsSync(path)
               ? fs.readFileSync(path, 'utf8')
               : 'Ally produced no output.';
+            const exitCode = process.env.ALLY_EXIT_CODE;
+
+            let header = '## 🔍 Ally Accessibility Audit';
+            let body = report;
+            if (exitCode && exitCode !== '0') {
+              header = '## ⚠️ Ally audit failed to run';
+              const details = `<details><summary>Raw output</summary>\n\n\`\`\`\n${report}\n\`\`\`\n</details>`;
+              body = /authentication failed/i.test(report)
+                ? 'The Copilot CLI could not authenticate. This repository is likely missing a ' +
+                  'working Copilot token.\n\n**Fix:** create a GitHub PAT with the **Copilot ' +
+                  'Requests** permission and add it as a repository secret named ' +
+                  '`COPILOT_GITHUB_TOKEN`, or enable "Allow use of Copilot CLI billed to the ' +
+                  'organization" in your org\'s Copilot policy — see the "Running Ally in CI" ' +
+                  `section of README.md.\n\n${details}`
+                : `Ally exited with an error (exit code ${exitCode}). See the workflow run logs ` +
+                  `for details.\n\n${details}`;
+            }
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `## 🔍 Ally Accessibility Audit\n\n${report}`,
+              body: `${header}\n\n${body}`,
             });
+
+      - name: Fail if Ally errored
+        if: steps.diff.outputs.has_changes == 'true' && steps.ally.outputs.exit_code != '0'
+        env:
+          ALLY_EXIT_CODE: ${{ steps.ally.outputs.exit_code }}
+        run: |
+          echo "::error::Ally CLI exited with code $ALLY_EXIT_CODE — see the PR comment for details."
+          exit 1
 
       - name: No XAML changes
         if: steps.fork-check.outputs.is_fork != 'true' && steps.diff.outputs.has_changes != 'true'
