@@ -244,8 +244,8 @@ rules 2–3) — never a plausible-looking placeholder.
    **Fix:**
    ```xml
    <Button Text="Log In"
-           SemanticProperties.Description="{markupExtensions:Localize A11y_LoginBtn_Description}"
-           SemanticProperties.Hint="{markupExtensions:Localize A11y_LoginBtn_Hint}" />
+           SemanticProperties.Description="{strings:Localize A11y_LoginBtn_Description}"
+           SemanticProperties.Hint="{strings:Localize A11y_LoginBtn_Hint}" />
    ```
    ```
 
@@ -631,8 +631,8 @@ If you add a `Description`, it must contain the visible `Text`:
 <Button
     x:Name="SaveBtn"
     Text="Save"
-    SemanticProperties.Description="{markupExtensions:Localize A11y_SaveBtn_Description}"
-    SemanticProperties.Hint="{markupExtensions:Localize A11y_SaveBtn_Hint}"
+    SemanticProperties.Description="{strings:Localize A11y_SaveBtn_Description}"
+    SemanticProperties.Hint="{strings:Localize A11y_SaveBtn_Hint}"
     Clicked="OnSave" />
 ```
 
@@ -661,7 +661,7 @@ No `SemanticProperties.Description` on a `Label` with `Text`. Use
 
 ```xml
 <Label
-    Text="{markupExtensions:Localize Account_Settings_Title}"
+    Text="{strings:Localize Account_Settings_Title}"
     SemanticProperties.HeadingLevel="Level1" />
 ```
 
@@ -673,12 +673,12 @@ instruction not already covered by label/placeholder). Don't blindly combine
 `Placeholder` and `Hint`.
 
 ```xml
-<Label x:Name="EmailLabel" Text="{markupExtensions:Localize Email_Label}" />
+<Label x:Name="EmailLabel" Text="{strings:Localize Email_Label}" />
 <Entry Text="{Binding Email}" />
 ```
 
 ```xml
-<Entry Placeholder="{markupExtensions:Localize Email_Placeholder}" Text="{Binding Email}" />
+<Entry Placeholder="{strings:Localize Email_Placeholder}" Text="{Binding Email}" />
 ```
 
 ### Image
@@ -687,7 +687,7 @@ Meaningful → add `Description`. Decorative → hide from the tree.
 
 ```xml
 <Image x:Name="LogoImage" Source="logo.png"
-       SemanticProperties.Description="{markupExtensions:Localize A11y_LogoImage_Description}" />
+       SemanticProperties.Description="{strings:Localize A11y_LogoImage_Description}" />
 
 <Image Source="divider.png" AutomationProperties.IsInAccessibleTree="False" />
 
@@ -707,7 +707,7 @@ platforms announce it.
 <HorizontalStackLayout>
     <CheckBox x:Name="TermsCheck"
         SemanticProperties.Description="{Binding Source={x:Reference TermsLabel}, Path=Text}" />
-    <Label x:Name="TermsLabel" Text="{markupExtensions:Localize Terms_Accept}" />
+    <Label x:Name="TermsLabel" Text="{strings:Localize Terms_Accept}" />
 </HorizontalStackLayout>
 ```
 
@@ -718,7 +718,7 @@ available. Flag missing `Minimum`/`Maximum` as
 `MAUI_A11Y_007_SLIDER_RANGE_MISSING`.
 
 ```xml
-<Label x:Name="VolumeLabel" Text="{markupExtensions:Localize Settings_Volume}" />
+<Label x:Name="VolumeLabel" Text="{strings:Localize Settings_Volume}" />
 <Slider x:Name="VolumeSlider"
     SemanticProperties.Description="{Binding Source={x:Reference VolumeLabel}, Path=Text}"
     Minimum="0" Maximum="100" Value="{Binding Volume}" />
@@ -732,7 +732,7 @@ accessibility-relevant and useful in overflow menus.
 
 ```xml
 <ToolbarItem IconImageSource="filter.png"
-    Text="{markupExtensions:Localize A11y_FilterToolbarItem_Description}"
+    Text="{strings:Localize A11y_FilterToolbarItem_Description}"
     Command="{Binding FilterCommand}" />
 ```
 
@@ -743,10 +743,10 @@ report `MAUI_A11Y_011_PICKER_TITLE_ONLY` — title-like placeholder text may
 vanish after selection.
 
 ```xml
-<Label x:Name="CurrencyLabel" Text="{markupExtensions:Localize Currency_Label}" />
+<Label x:Name="CurrencyLabel" Text="{strings:Localize Currency_Label}" />
 <Picker x:Name="CurrencyPicker"
     SemanticProperties.Description="{Binding Source={x:Reference CurrencyLabel}, Path=Text}"
-    Title="{markupExtensions:Localize Currency_Picker_Title}"
+    Title="{strings:Localize Currency_Picker_Title}"
     ItemsSource="{Binding Currencies}" />
 ```
 
@@ -857,7 +857,7 @@ If a `Label` looks like a section title with no `HeadingLevel` set, fire
 `HeadingLevel`.
 
 ```xml
-<Label Text="{markupExtensions:Localize Orders_Title}"
+<Label Text="{strings:Localize Orders_Title}"
        SemanticProperties.HeadingLevel="Level1" />
 ```
 
@@ -875,7 +875,7 @@ for manual review — runtime context may matter.
 
 ## Localization Modes
 
-**Mode A — Localized default.** Emit `{markupExtensions:Localize Key}`; the
+**Mode A — Localized default.** Emit `{strings:Localize Key}`; the
 `.resx` entry value is the configured `placeholderValue`; suggested English
 text appears in the preview/report, not in the committed `.resx`.
 
@@ -951,7 +951,7 @@ field's meaning is ambiguous, ask rather than guessing or dropping it.
   "resxPath": "MyApp.UI/Localization/Translations.resx",
   "constantsFile": "MyApp.Core/CoreConstants.cs",
   "constantsClassPath": "CoreConstants.TranslationKeys",
-  "localizeNamespace": "markupExtensions",
+  "localizeNamespace": "strings",
   "keyPrefix": "A11y",
   "placeholderValue": "TODO: add translation",
   "headingDefaultLevel": "Level1",
