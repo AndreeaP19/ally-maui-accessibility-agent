@@ -1,31 +1,38 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:strings="clr-namespace:SampleApp.Resources.Localization"
              x:Class="SampleApp.Views.SettingsPage"
              Title="Settings">
     <VerticalStackLayout Padding="24" Spacing="16">
+
+        <Label Text="Account"
+               FontSize="20"
+               SemanticProperties.HeadingLevel="Level1" />
+
+        <Button Text="Profile"
+                Clicked="OnProfileTapped"
+                HorizontalOptions="Fill" />
 
         <Label Text="Preferences"
                FontSize="20"
                SemanticProperties.HeadingLevel="Level1" />
 
-        <!-- Deliberate violation: hardcoded accessibility string, not localized
-             (this repo's .allyconfig.json sets localize: true).
-             Expected finding: MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT -->
         <Image Source="notification_bell.png"
-               SemanticProperties.Description="Notification settings icon" />
+               SemanticProperties.Description="{strings:Localize A11y_NotificationIcon_Description}" />
 
         <Label Text="Volume" />
-        <!-- Deliberate violation: no Minimum/Maximum set.
-             Expected finding: MAUI_A11Y_007_SLIDER_RANGE_MISSING -->
         <Slider x:Name="VolumeSlider"
-                Value="{Binding Volume}" />
+                Minimum="0"
+                Maximum="1"
+                Value="{Binding Volume}"
+                SemanticProperties.Description="Volume" />
 
-        <!-- Deliberate violation: Picker uses Title only, no bound describing label.
-             Expected finding: MAUI_A11Y_011_PICKER_TITLE_ONLY -->
+        <Label x:Name="LanguageLabel" Text="Language" />
         <Picker x:Name="LanguagePicker"
                 Title="Language"
-                ItemsSource="{Binding Languages}" />
+                ItemsSource="{Binding Languages}"
+                SemanticProperties.Description="Language" />
 
     </VerticalStackLayout>
 </ContentPage>

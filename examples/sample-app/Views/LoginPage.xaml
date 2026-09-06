@@ -6,11 +6,10 @@
              Title="Login">
     <VerticalStackLayout Padding="24" Spacing="16">
 
-        <!-- Deliberate violation: icon-only ImageButton with no accessible name.
-             Expected finding: MAUI_A11Y_001_ICON_ONLY_TOOLBAR -->
         <ImageButton Source="back_arrow.png"
                      Clicked="OnBackTapped"
-                     HorizontalOptions="Start" />
+                     HorizontalOptions="Start"
+                     SemanticProperties.Description="Back" />
 
         <Label Text="Welcome back"
                FontSize="24"
@@ -19,32 +18,23 @@
         <Entry x:Name="EmailEntry"
                Placeholder="Email" />
 
-        <!-- Deliberate violation: Description on Entry/Editor breaks Android
-             TalkBack edit actions.
-             Expected finding: MAUI_A11Y_006_ENTRY_DESCRIPTION_ANDROID -->
         <Entry x:Name="PasswordEntry"
                Placeholder="Password"
-               IsPassword="True"
-               SemanticProperties.Description="Enter your account password" />
+               IsPassword="True" />
 
         <HorizontalStackLayout Spacing="8">
-            <!-- Deliberate violation: CheckBox with no describing label bound.
-                 Expected finding: MAUI_A11Y_010_CHECKBOX_NO_LABEL -->
-            <CheckBox x:Name="RememberMeCheck" />
+            <CheckBox x:Name="RememberMeCheck"
+                      SemanticProperties.Description="Remember me" />
             <Label Text="Remember me" />
         </HorizontalStackLayout>
 
-        <!-- Deliberate violation: Description does not contain the visible Text.
-             Expected finding: MAUI_A11Y_002_LABEL_IN_NAME -->
         <Button Text="Log In"
                 Clicked="OnLoginClicked"
-                SemanticProperties.Description="Submit the login form and navigate to the dashboard" />
+                SemanticProperties.Hint="Submit the login form and navigate to the dashboard" />
 
-        <!-- Deliberate violation: Description does not contain the visible Text.
-             Expected finding: MAUI_A11Y_002_LABEL_IN_NAME -->
         <Button Text="Forgot Password?"
                 Clicked="OnForgotPasswordTapped"
-                SemanticProperties.Description="Send a password reset link to your email" />
+                SemanticProperties.Hint="Forgot Password?: send a password reset link to your email" />
 
     </VerticalStackLayout>
 </ContentPage>

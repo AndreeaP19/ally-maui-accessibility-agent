@@ -13,4 +13,14 @@ public partial class App : Application
     {
         return new Window(new NavigationPage(new LoginPage()));
     }
+
+    public static void SetRootPage(Page page)
+    {
+        if (Current is null)
+        {
+            return;
+        }
+
+        Current.Windows[0].Page = page;
+    }
 }

@@ -1,3 +1,5 @@
+using SampleApp;
+
 namespace SampleApp.Views;
 
 public partial class LoginPage : ContentPage
@@ -14,6 +16,7 @@ public partial class LoginPage : ContentPage
 
     private void OnLoginClicked(object sender, EventArgs e)
     {
+        App.SetRootPage(new AppShell());
     }
 
     private void OnForgotPasswordTapped(object sender, EventArgs e)
