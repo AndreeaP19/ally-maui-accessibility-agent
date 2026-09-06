@@ -71,7 +71,9 @@ jobs:
         run: |
           BASE_REF="${BASE_REF#refs/heads/}"
           BASE_REF="${BASE_REF#origin/}"
-          git fetch origin "$BASE_REF" --depth=1
+          # No --depth: a shallow fetch here can't be undone by a later
+          # plain re-fetch, and would break the merge-base diff below.
+          git fetch origin "$BASE_REF"
           CHANGED=$(git diff --name-only --diff-filter=ACMR "origin/$BASE_REF...HEAD" -- "$XAML_GLOB")
 
           if [ -z "$CHANGED" ]; then
