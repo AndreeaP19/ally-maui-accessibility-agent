@@ -15,6 +15,15 @@ on:
         required: false
         type: string
         default: "**/*.xaml"
+      copilot-model:
+        description: >
+          Model id to pin for the Copilot CLI (e.g. "claude-opus-4-5",
+          "gpt-5"). Optional — leave unset to use your Copilot backend/org
+          policy's default model, which can change over time. Sets the
+          CLI's COPILOT_MODEL environment variable for the audit step.
+        required: false
+        type: string
+        default: ""
 
 # copilot-requests: write lets the Copilot CLI authenticate with this job's
 # own automatic GITHUB_TOKEN — no PAT/secret needed (see the "Running Ally
@@ -106,7 +115,11 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           ALLY_CHANGED_FILES: ${{ steps.diff.outputs.files }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
+          INPUT_COPILOT_MODEL: ${{ inputs.copilot-model }}
         run: |
+          if [ -n "$INPUT_COPILOT_MODEL" ]; then
+            export COPILOT_MODEL="$INPUT_COPILOT_MODEL"
+          fi
           printf '%s\n' \
             "Load the agent at .github/agents/ally.md and run /ally diff ${BASE_REF}." \
             'The files changed relative to that base branch are listed below —' \

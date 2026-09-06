@@ -8,15 +8,22 @@ jobs:
   ally-audit:
     # A reusable workflow can't be granted more than its caller allows — this
     # job must explicitly request at least what ally-audit.yml itself needs
-    # (contents: read, pull-requests: write), since a repo's default token
-    # permissions (Settings > Actions > General > Workflow permissions) are
-    # often read-only and would otherwise cap it down to "none" and fail
-    # workflow validation before the job even starts.
+    # (contents: read, pull-requests: write, copilot-requests: write), since
+    # a repo's default token permissions (Settings > Actions > General >
+    # Workflow permissions) are often read-only and would otherwise cap it
+    # down to "none" and fail workflow validation before the job even starts.
+    # copilot-requests: write is what lets the Copilot CLI authenticate with
+    # this job's own automatic GITHUB_TOKEN — no PAT/secret needed.
     permissions:
       contents: read
       pull-requests: write
+      copilot-requests: write
     # Pin this reusable workflow to a tag or commit SHA in production repos;
     # @main can change without review.
     uses: AndreeaP19/ally-maui-accessibility-agent/.github/workflows/ally-audit.yml@1d97e2dccd770298e1b85c5b55b02b1ed7ee12d0
-    secrets:
-      copilot-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+    with:
+      # Optional: pin a specific model instead of your Copilot backend/org
+      # policy's default, which can change over time. Uncomment and set to
+      # a model id your Copilot plan supports.
+      # copilot-model: claude-opus-4-5
+      xaml-glob: "**/*.xaml"

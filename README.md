@@ -75,25 +75,48 @@ The wizard asks **one question at a time** and detects your `.resx` resource fil
 
 ## Running Ally in CI
 
-Ally can run in CI as a read-only check: it invokes `/ally diff` against the pull request's actual target branch, which reports findings only for changed hunks in the files a PR actually touches — not a full-repo `/ally feedback` pass. It always uses the PR's real target branch (from the platform's own PR metadata), not `.allyconfig.json`'s `defaultBaseBranch` — that field only matters for a local/manual `/ally diff` with no `[base-branch]` argument, so it stays correct even for repos where PRs sometimes target something other than `main` (e.g. a release branch). Findings are posted as a single PR review with one inline comment per finding, anchored to the exact file and line — not a flat comment dump — so each finding shows up next to the offending element in the diff view. `/ally apply` is deliberately left out of automation — the apply checkpoint's confirmation step is a safety feature, not a formality, and there's no one in CI to confirm it. Always run `/ally apply` manually, locally.
+Ally can run in CI as a read-only check: it invokes `/ally diff` against the pull request's actual target branch, reporting findings only for changed hunks in the files a PR actually touches — not a full-repo `/ally feedback` pass. It always uses the PR's real target branch (from the platform's own PR metadata), not `.allyconfig.json`'s `defaultBaseBranch` — that field only matters for a local/manual `/ally diff` with no `[base-branch]` argument, so it stays correct even for repos where PRs sometimes target something other than `main` (e.g. a release branch). `/ally apply` is deliberately left out of automation — the apply checkpoint's confirmation step is a safety feature, not a formality, and there's no one in CI to confirm it. Always run `/ally apply` manually, locally.
 
-**The CI check still fails the gate on top of posting comments — this is intentional, not redundant.** The inline comments are for *visibility and actionability*: what's wrong, exactly where, and how to fix it. The failing check is what *enforces* the gate: nothing about a PR comment stops the PR from being merged unless a required status check backs it up, so if the check always passed, `failOn` would be purely decorative. Concretely: a finding's severity meeting or exceeding `failOn` fails the check even though the same finding is already visible as a comment. To change what's enforced, adjust `failOn` in `.allyconfig.json` (e.g. `"major"` to also block on major findings, or `"info"` to fail on any finding) — no workflow change needed, since the gate reads that value at run time.
+Findings are posted as a single PR review with one inline comment per finding, anchored to the exact file and line, plus a separate standalone summary comment with the severity counts — not a flat comment dump.
 
-### GitHub Actions
+> Only GitHub Actions is currently supported. Azure DevOps support isn't currently maintained.
+
+### Setup
 
 1. Copy `.github/agents/ally.md` into the target repository, at the same path (`.github/agents/ally.md`). `.allyconfig.json` isn't something to copy from this template — it's project-specific. In the target repository, run `/ally config` (if it hasn't been already) to generate and commit one.
 2. Add a caller workflow that invokes the reusable workflow in this repo — see [`examples/github-actions/ally-audit-caller.yml`](examples/github-actions/ally-audit-caller.yml).
-3. In the caller job, include:
-   - `permissions: { contents: read, pull-requests: write, copilot-requests: write }`
-   - no `secrets:` mapping for `copilot-token` (the reusable workflow already uses `github.token` when no secret is provided).
-4. **Auth:** the default `GITHUB_TOKEN` only works if the organization's Copilot policy allows "Allow use of Copilot CLI billed to the organization." Otherwise, create a PAT with the **Copilot Requests** permission and pass it via the optional reusable-workflow secret `copilot-token` (for example from a repository secret such as `COPILOT_GITHUB_TOKEN`).
-5. **Model selection:** by default, `copilot` uses your Copilot backend/org policy defaults. To pin a specific model for CI, pass it explicitly in the CLI command (for example `--model gpt-5.3-codex`).
+3. Grant the caller job at least:
+   ```yaml
+   permissions:
+     contents: read
+     pull-requests: write
+     copilot-requests: write
+   ```
+   A reusable workflow can never be granted more than its caller allows, and a repo's default token permissions (Settings → Actions → General → Workflow permissions) are often read-only — without this, the job fails workflow validation before it even starts.
 
-> Only GitHub Actions is supported for now. Azure DevOps support isn't currently maintained.
+### Authentication
+
+`copilot-requests: write` above is all the auth this needs — it lets the Copilot CLI authenticate with the job's own automatic `GITHUB_TOKEN`, no secret or PAT required. This only fails to work if your organization's Copilot policy blocks CLI usage outright, which is a Copilot administration setting to fix, not something to work around in the workflow.
+
+### Pinning the model (recommended)
+
+By default, `copilot` uses whatever model your Copilot backend/org policy currently defaults to — which can change between CI runs as that policy changes, silently shifting what Ally finds. To pin a specific model instead, pass the reusable workflow's `copilot-model` input:
+
+```yaml
+uses: AndreeaP19/ally-maui-accessibility-agent/.github/workflows/ally-audit.yml@<ref>
+with:
+  copilot-model: claude-opus-4-5
+```
+
+This sets the CLI's `COPILOT_MODEL` environment variable for the audit step only. Leave it unset to keep following your org's default. Model availability depends on your Copilot plan — check what's available before pinning one.
+
+### Why the check still fails despite posting comments
+
+**This is intentional, not redundant.** The inline comments are for *visibility and actionability*: what's wrong, exactly where, and how to fix it. The failing check is what *enforces* the gate: nothing about a PR comment stops the PR from being merged unless a required status check backs it up, so if the check always passed, `failOn` would be purely decorative. Concretely: a finding's severity meeting or exceeding `failOn` fails the check even though the same finding is already visible as a comment. To change what's enforced, adjust `failOn` in `.allyconfig.json` (e.g. `"major"` to also block on major findings, or `"info"` to fail on any finding) — no workflow change needed, since the gate reads that value at run time.
 
 ### Sample app (CI self-test)
 
-[`examples/sample-app/`](examples/sample-app/) is a minimal, non-buildable MAUI-style project — a couple of `.xaml` files seeded with deliberate accessibility violations and a matching `.resx` — that exists to exercise the CI integration for real, not just document it. [`.github/workflows/sample-app-audit.yml`](.github/workflows/sample-app-audit.yml) runs the GitHub Actions integration against it on every PR that touches the sample files, the agent, or the reusable workflow, so a broken pipeline shows up as a failed check instead of silently rotting. It needs the same `COPILOT_GITHUB_TOKEN` repository secret described above to actually run.
+[`examples/sample-app/`](examples/sample-app/) is a minimal, non-buildable MAUI-style project — a couple of `.xaml` files seeded with deliberate accessibility violations and a matching `.resx` — that exists to exercise the CI integration for real, not just document it. [`.github/workflows/sample-app-audit.yml`](.github/workflows/sample-app-audit.yml) runs the GitHub Actions integration against it on every PR that touches the sample files, the agent, or the reusable workflow, so a broken pipeline shows up as a failed check instead of silently rotting. It relies on the same `copilot-requests: write` permission described above — no secret needed.
 
 ---
 
