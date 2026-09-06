@@ -122,6 +122,9 @@ jobs:
             > ally-prompt.txt
           echo "$ALLY_CHANGED_FILES" >> ally-prompt.txt
 
+          FAIL_ON=$(node -e "const fs=require('fs');const p='.allyconfig.json';if(!fs.existsSync(p)){console.error('::error::.allyconfig.json is missing at repo root.');process.exit(1);}let cfg;try{cfg=JSON.parse(fs.readFileSync(p,'utf8'));}catch(e){console.error('::error::Failed to parse .allyconfig.json as JSON.');process.exit(1);}const allowed=['critical','major','minor','info'];const v=String(cfg.failOn||'').toLowerCase();if(!allowed.includes(v)){console.error('::error::.allyconfig.json failOn must be one of: critical, major, minor, info.');process.exit(1);}process.stdout.write(v);")
+          echo "fail_on=$FAIL_ON" >> "$GITHUB_OUTPUT"
+
           # Don't let a Copilot CLI failure (e.g. an invalid/missing token)
           # abort the job here — the "Post PR comment" step below still needs
           # to run so the failure is reported on the PR itself, not just
@@ -137,6 +140,7 @@ jobs:
         env:
           ALLY_REPORT_PATH: ally-report.md
           ALLY_EXIT_CODE: ${{ steps.ally.outputs.exit_code }}
+          ALLY_FAIL_ON: ${{ steps.ally.outputs.fail_on }}
         with:
           script: |
             const fs = require('fs');
@@ -145,6 +149,7 @@ jobs:
               ? fs.readFileSync(path, 'utf8')
               : 'Ally produced no output.';
             const exitCode = process.env.ALLY_EXIT_CODE;
+            const failOn = process.env.ALLY_FAIL_ON || 'critical';
 
             let header = '## 🔍 Ally Accessibility Audit';
             let body = report;
@@ -159,6 +164,8 @@ jobs:
                   `${details}`
                 : `Ally exited with an error (exit code ${exitCode}). See the workflow run logs ` +
                   `for details.\n\n${details}`;
+            } else {
+              header = `${header} (failOn: ${failOn})`;
             }
 
             await github.rest.issues.createComment({
@@ -175,6 +182,46 @@ jobs:
         run: |
           echo "::error::Ally CLI exited with code $ALLY_EXIT_CODE — see the PR comment for details."
           exit 1
+
+      - name: Fail on configured severity gate
+        if: steps.diff.outputs.has_changes == 'true' && steps.ally.outputs.exit_code == '0'
+        env:
+          ALLY_FAIL_ON: ${{ steps.ally.outputs.fail_on }}
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const reportPath = 'ally-report.md';
+          const failOn = (process.env.ALLY_FAIL_ON || '').toLowerCase();
+          const rank = { info: 0, minor: 1, major: 2, critical: 3 };
+          if (!(failOn in rank)) {
+            console.error(`::error::Invalid failOn threshold: "${failOn}".`);
+            process.exit(1);
+          }
+          if (!fs.existsSync(reportPath)) {
+            console.error('::error::Ally report file not found.');
+            process.exit(1);
+          }
+
+          const text = fs.readFileSync(reportPath, 'utf8');
+          const findings = [];
+          for (const line of text.split(/\r?\n/)) {
+            const match = line.match(/(?:^|\W)(critical|major|minor|info)(?:\W|$)/i);
+            if (!match) continue;
+            const sev = match[1].toLowerCase();
+            if (rank[sev] < rank[failOn]) continue;
+            findings.push({ sev, line: line.trim() });
+          }
+
+          if (findings.length > 0) {
+            console.error(`::error::Accessibility findings at or above "${failOn}" detected (${findings.length}).`);
+            for (const f of findings.slice(0, 20)) {
+              console.error(`- [${f.sev}] ${f.line}`);
+            }
+            process.exit(1);
+          }
+
+          console.log(`No findings at or above "${failOn}".`);
+          NODE
 
       - name: No XAML changes
         if: steps.fork-check.outputs.is_fork != 'true' && steps.diff.outputs.has_changes != 'true'
