@@ -21,4 +21,22 @@
   <data name="A11y_NotificationIcon_Description" xml:space="preserve">
     <value>Notification settings icon</value>
   </data>
+  <data name="A11y_BackButton_Description" xml:space="preserve">
+    <value>Back</value>
+  </data>
+  <data name="A11y_RememberMeCheckbox_Description" xml:space="preserve">
+    <value>Remember me</value>
+  </data>
+  <data name="A11y_LoginBtn_Hint" xml:space="preserve">
+    <value>Submit the login form and navigate to the dashboard</value>
+  </data>
+  <data name="A11y_ForgotPasswordBtn_Hint" xml:space="preserve">
+    <value>Forgot Password?: send a password reset link to your email</value>
+  </data>
+  <data name="A11y_VolumeSlider_Description" xml:space="preserve">
+    <value>Volume</value>
+  </data>
+  <data name="A11y_LanguagePicker_Description" xml:space="preserve">
+    <value>Language</value>
+  </data>
 </root>

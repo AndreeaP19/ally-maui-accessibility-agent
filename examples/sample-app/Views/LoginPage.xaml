@@ -9,7 +9,7 @@
         <ImageButton Source="back_arrow.png"
                      Clicked="OnBackTapped"
                      HorizontalOptions="Start"
-                     SemanticProperties.Description="Back" />
+                     SemanticProperties.Description="{strings:Localize A11y_BackButton_Description}" />
 
         <Label Text="Welcome back"
                FontSize="24"
@@ -24,17 +24,17 @@
 
         <HorizontalStackLayout Spacing="8">
             <CheckBox x:Name="RememberMeCheck"
-                      SemanticProperties.Description="Remember me" />
+                      SemanticProperties.Description="{strings:Localize A11y_RememberMeCheckbox_Description}" />
             <Label Text="Remember me" />
         </HorizontalStackLayout>
 
         <Button Text="Log In"
                 Clicked="OnLoginClicked"
-                SemanticProperties.Hint="Submit the login form and navigate to the dashboard" />
+                SemanticProperties.Hint="{strings:Localize A11y_LoginBtn_Hint}" />
 
         <Button Text="Forgot Password?"
                 Clicked="OnForgotPasswordTapped"
-                SemanticProperties.Hint="Forgot Password?: send a password reset link to your email" />
+                SemanticProperties.Hint="{strings:Localize A11y_ForgotPasswordBtn_Hint}" />
 
     </VerticalStackLayout>
 </ContentPage>

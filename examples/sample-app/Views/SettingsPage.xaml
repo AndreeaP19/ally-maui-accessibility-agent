@@ -26,13 +26,13 @@
                 Minimum="0"
                 Maximum="1"
                 Value="{Binding Volume}"
-                SemanticProperties.Description="Volume" />
+                SemanticProperties.Description="{strings:Localize A11y_VolumeSlider_Description}" />
 
         <Label x:Name="LanguageLabel" Text="Language" />
         <Picker x:Name="LanguagePicker"
                 Title="Language"
                 ItemsSource="{Binding Languages}"
-                SemanticProperties.Description="Language" />
+                SemanticProperties.Description="{strings:Localize A11y_LanguagePicker_Description}" />
 
     </VerticalStackLayout>
 </ContentPage>
