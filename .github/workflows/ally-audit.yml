@@ -15,17 +15,14 @@ on:
         required: false
         type: string
         default: "**/*.xaml"
-    secrets:
-      copilot-token:
-        description: >
-          GitHub PAT with the "Copilot Requests" permission. Required unless the
-          calling repo's organization allows GITHUB_TOKEN to bill Copilot CLI usage
-          to the organization, in which case this can be omitted.
-        required: false
 
+# copilot-requests: write lets the Copilot CLI authenticate with this job's
+# own automatic GITHUB_TOKEN — no PAT/secret needed (see the "Running Ally
+# in CI" section of README.md).
 permissions:
   contents: read
   pull-requests: write
+  copilot-requests: write
 
 jobs:
   ally-audit:
