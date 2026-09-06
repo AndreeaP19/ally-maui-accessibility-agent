@@ -201,7 +201,7 @@ All generated accessibility strings are emitted through the configured
 localization markup extension (the `localizeNamespace` alias):
 
 ```xml
-SemanticProperties.Description="{markupExtensions:Localize A11y_NotesBtn_Description}"
+SemanticProperties.Description="{strings:Localize A11y_NotesBtn_Description}"
 ```
 
 New resource keys are added to the `.resx` file with the placeholder value `TODO: add translation` (configurable via `placeholderValue`). The suggested English text appears in the audit report only — it is never committed to the `.resx` automatically.

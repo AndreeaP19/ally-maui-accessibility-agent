@@ -69,11 +69,15 @@ steps:
       git fetch origin "$TRUSTED_BRANCH_NAME"
       CONFIG_BASE=$(git show "origin/$TRUSTED_BRANCH_NAME:.allyconfig.json" 2>/dev/null | python3 -c "import json, sys; raw = sys.stdin.read(); d = json.loads(raw) if raw.strip() else {}; print((d or {}).get('defaultBaseBranch') or '')" 2>/dev/null || true)
       if [ -n "$CONFIG_BASE" ]; then
-        echo "Using defaultBaseBranch from .allyconfig.json (as committed on $TRUSTED_BRANCH_NAME): $CONFIG_BASE"
+        CONFIG_BASE="${CONFIG_BASE#refs/heads/}"
+        CONFIG_BASE="${CONFIG_BASE#origin/}"
+        echo "Using defaultBaseBranch from .allyconfig.json: $CONFIG_BASE"
         echo "##vso[task.setvariable variable=targetBranchName]$CONFIG_BASE"
       else
+        TARGET_BRANCH="${TARGET_BRANCH#refs/heads/}"
+        TARGET_BRANCH="${TARGET_BRANCH#origin/}"
         echo "No defaultBaseBranch in .allyconfig.json — using this PR's actual target branch."
-        echo "##vso[task.setvariable variable=targetBranchName]$TRUSTED_BRANCH_NAME"
+        echo "##vso[task.setvariable variable=targetBranchName]$TARGET_BRANCH"
       fi
     displayName: "Resolve base branch"
     env:
@@ -86,10 +90,9 @@ steps:
 
   - script: |
       set -e
-      # No --depth: a shallow fetch here would make the three-dot diff below
-      # fail with "no merge base" once $TARGET_BRANCH_NAME has advanced past
-      # this PR's fork point — the ordinary case on an active repo.
-      git fetch origin "$TARGET_BRANCH_NAME"
+      TARGET_BRANCH_NAME="${TARGET_BRANCH_NAME#refs/heads/}"
+      TARGET_BRANCH_NAME="${TARGET_BRANCH_NAME#origin/}"
+      git fetch origin "$TARGET_BRANCH_NAME" --depth=1
       TARGET_REF="origin/$TARGET_BRANCH_NAME"
       CHANGED=$(git diff --name-only --diff-filter=ACMR "$TARGET_REF...HEAD" -- "$XAML_GLOB")
 
