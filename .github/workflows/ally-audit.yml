@@ -87,7 +87,7 @@ jobs:
         if: steps.diff.outputs.has_changes == 'true'
         id: ally
         env:
-          GITHUB_TOKEN: ${{ secrets.copilot-token || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.copilot-token || github.token }}
           ALLY_CHANGED_FILES: ${{ steps.diff.outputs.files }}
           BASE_REF: ${{ steps.base.outputs.base_ref }}
         run: |

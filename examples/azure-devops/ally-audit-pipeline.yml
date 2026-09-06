@@ -14,8 +14,10 @@
 #   3. Create a secret pipeline variable named COPILOT_GITHUB_TOKEN containing
 #      a GitHub PAT with the "Copilot Requests" permission. Copilot billing is
 #      always GitHub-side, so this is required regardless of CI host.
-#   4. Copy .github/agents/ally.md and .allyconfig.json from the
-#      ally-maui-accessibility-agent repo into this repo, at the same paths.
+#   4. Copy .github/agents/ally.md from the ally-maui-accessibility-agent repo
+#      into this repo, at the same path. .allyconfig.json isn't something to
+#      copy — it's project-specific. Run /ally config in this repo (if it
+#      hasn't been already) to generate and commit one.
 #
 # Base branch resolution: this pipeline diffs against .allyconfig.json's
 # defaultBaseBranch when set, falling back to the PR's actual target branch
