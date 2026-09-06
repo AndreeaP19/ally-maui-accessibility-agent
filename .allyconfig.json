@@ -5,6 +5,7 @@
   "keyConvention": "Pascal_Underscore",
   "defaultBaseBranch": "main",
   "failOn": "critical",
+  "orderDetection": true,
   "excludePaths": ["**/bin/**", "**/obj/**"],
   "readOnlyPaths": [],
   "suppressions": []
