@@ -78,7 +78,7 @@ jobs:
           ALLY_PROMPT_EOF
           echo "$ALLY_CHANGED_FILES" >> ally-prompt.txt
 
-          copilot -p "$(cat ally-prompt.txt)" --allow-tool search/codebase > ally-report.md
+          copilot -p "Load the agent at .github/agents/ally.md and run /ally feedback using the attached scope file." --attachment ally-prompt.txt --allow-tool search/codebase > ally-report.md
 
       - name: Post PR comment
         if: steps.diff.outputs.has_changes == 'true'
