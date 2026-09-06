@@ -1,5 +1,12 @@
 name: Ally Accessibility Audit
 
+# Base branch resolution: this workflow diffs against .allyconfig.json's
+# defaultBaseBranch when set, falling back to the calling PR's actual target
+# branch otherwise. If this repo's PRs ever target a branch other than
+# defaultBaseBranch (e.g. a release branch), the diff will still be taken
+# against defaultBaseBranch — update it, or unset it to always follow the
+# PR's real target.
+
 on:
   workflow_call:
     inputs:
@@ -31,14 +38,36 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve base branch
+        id: base
+        run: |
+          CONFIG_BASE=""
+          if [ -f .allyconfig.json ]; then
+            CONFIG_BASE=$(jq -r '.defaultBaseBranch // empty' .allyconfig.json 2>/dev/null || true)
+          fi
+          if [ -n "$CONFIG_BASE" ]; then
+            CONFIG_BASE="${CONFIG_BASE#refs/heads/}"
+            CONFIG_BASE="${CONFIG_BASE#origin/}"
+            echo "Using defaultBaseBranch from .allyconfig.json: $CONFIG_BASE"
+            echo "base_ref=$CONFIG_BASE" >> "$GITHUB_OUTPUT"
+          else
+            PR_BASE_REF="${{ github.event.pull_request.base.ref }}"
+            PR_BASE_REF="${PR_BASE_REF#refs/heads/}"
+            PR_BASE_REF="${PR_BASE_REF#origin/}"
+            echo "No defaultBaseBranch in .allyconfig.json — using this PR's actual target branch."
+            echo "base_ref=$PR_BASE_REF" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Find changed XAML files
         id: diff
         env:
           XAML_GLOB: ${{ inputs.xaml-glob }}
+          BASE_REF: ${{ steps.base.outputs.base_ref }}
         run: |
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          CHANGED=$(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" -- "$XAML_GLOB")
+          BASE_REF="${BASE_REF#refs/heads/}"
+          BASE_REF="${BASE_REF#origin/}"
+          git fetch origin "$BASE_REF" --depth=1
+          CHANGED=$(git diff --name-only --diff-filter=ACMR "origin/$BASE_REF...HEAD" -- "$XAML_GLOB")
 
           if [ -z "$CHANGED" ]; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
@@ -61,16 +90,20 @@ jobs:
         if: steps.diff.outputs.has_changes == 'true'
         run: npm install -g @github/copilot@$COPILOT_CLI_VERSION
 
-      - name: Run Ally feedback
+      - name: Run Ally diff audit
         if: steps.diff.outputs.has_changes == 'true'
         id: ally
         env:
-          GITHUB_TOKEN: ${{ secrets.copilot-token || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.copilot-token || github.token }}
           ALLY_CHANGED_FILES: ${{ steps.diff.outputs.files }}
+          BASE_REF: ${{ steps.base.outputs.base_ref }}
         run: |
           printf '%s\n' \
-            'Load the agent at .github/agents/ally.md and run /ally feedback.' \
-            'Restrict the audit to only the changed files listed below. Respect' \
+            "Load the agent at .github/agents/ally.md and run /ally diff ${BASE_REF}." \
+            'The files changed relative to that base branch are attached below —' \
+            'use exactly this list as the diff scope; do not run git yourself to' \
+            'recompute it. Restrict reported findings to changed hunks (±3 lines)' \
+            'within these files, per the /ally diff command definition. Respect' \
             '.allyconfig.json only after confirming it exists at the repo root;' \
             'if it is missing, stop and report that the audit was skipped. Do not' \
             'write or modify any files. Output the full findings report as' \
@@ -80,7 +113,7 @@ jobs:
             > ally-prompt.txt
           echo "$ALLY_CHANGED_FILES" >> ally-prompt.txt
 
-          copilot -p "Load the agent at .github/agents/ally.md and run /ally feedback using the attached scope file." --attachment ally-prompt.txt --allow-tool search/codebase > ally-report.md
+          copilot -p "Load the agent at .github/agents/ally.md and run /ally diff using the attached scope file." --attachment ally-prompt.txt --allow-tool search/codebase > ally-report.md
 
       - name: Post PR comment
         if: steps.diff.outputs.has_changes == 'true'

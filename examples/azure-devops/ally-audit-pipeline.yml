@@ -1,7 +1,8 @@
 # Ally Accessibility Audit — Azure DevOps pipeline example
 #
-# Runs a read-only `/ally feedback` audit against the XAML files changed in a
-# pull request, then posts the findings as a PR comment thread.
+# Runs a read-only `/ally diff` audit — scoped to changed hunks (±3 lines) in
+# the XAML files changed in a pull request, not a full-repo feedback pass —
+# then posts the findings as a PR comment thread.
 #
 # Prerequisites:
 #   1. Enable "Allow scripts to access the OAuth token" on this pipeline
@@ -13,8 +14,17 @@
 #   3. Create a secret pipeline variable named COPILOT_GITHUB_TOKEN containing
 #      a GitHub PAT with the "Copilot Requests" permission. Copilot billing is
 #      always GitHub-side, so this is required regardless of CI host.
-#   4. Copy .github/agents/ally.md and .allyconfig.json from the
-#      ally-maui-accessibility-agent repo into this repo, at the same paths.
+#   4. Copy .github/agents/ally.md from the ally-maui-accessibility-agent repo
+#      into this repo, at the same path. .allyconfig.json isn't something to
+#      copy — it's project-specific. Run /ally config in this repo (if it
+#      hasn't been already) to generate and commit one.
+#
+# Base branch resolution: this pipeline diffs against .allyconfig.json's
+# defaultBaseBranch when set, falling back to the PR's actual target branch
+# otherwise. If this repo's PRs ever target a branch other than
+# defaultBaseBranch (e.g. a release branch), the diff will still be taken
+# against defaultBaseBranch — update it, or unset it to always follow the
+# PR's real target.
 
 trigger: none
 
@@ -46,8 +56,31 @@ steps:
 
   - script: |
       set -e
-      git fetch origin "$TARGET_BRANCH" --depth=1
-      TARGET_REF="origin/${TARGET_BRANCH#refs/heads/}"
+      CONFIG_BASE=""
+      if [ -f .allyconfig.json ]; then
+        CONFIG_BASE=$(python3 -c "import json; print(json.load(open('.allyconfig.json')).get('defaultBaseBranch',''))" 2>/dev/null || true)
+      fi
+      if [ -n "$CONFIG_BASE" ]; then
+        CONFIG_BASE="${CONFIG_BASE#refs/heads/}"
+        CONFIG_BASE="${CONFIG_BASE#origin/}"
+        echo "Using defaultBaseBranch from .allyconfig.json: $CONFIG_BASE"
+        echo "##vso[task.setvariable variable=targetBranchName]$CONFIG_BASE"
+      else
+        TARGET_BRANCH="${TARGET_BRANCH#refs/heads/}"
+        TARGET_BRANCH="${TARGET_BRANCH#origin/}"
+        echo "No defaultBaseBranch in .allyconfig.json — using this PR's actual target branch."
+        echo "##vso[task.setvariable variable=targetBranchName]$TARGET_BRANCH"
+      fi
+    displayName: "Resolve base branch"
+    env:
+      TARGET_BRANCH: $(System.PullRequest.TargetBranch)
+
+  - script: |
+      set -e
+      TARGET_BRANCH_NAME="${TARGET_BRANCH_NAME#refs/heads/}"
+      TARGET_BRANCH_NAME="${TARGET_BRANCH_NAME#origin/}"
+      git fetch origin "$TARGET_BRANCH_NAME" --depth=1
+      TARGET_REF="origin/$TARGET_BRANCH_NAME"
       CHANGED=$(git diff --name-only --diff-filter=ACMR "$TARGET_REF...HEAD" -- "$XAML_GLOB")
 
       if [ -z "$CHANGED" ]; then
@@ -59,14 +92,17 @@ steps:
       cat changed-files.txt
     displayName: "Find changed XAML files"
     env:
-      TARGET_BRANCH: $(System.PullRequest.TargetBranch)
+      TARGET_BRANCH_NAME: $(targetBranchName)
       XAML_GLOB: $(xamlGlob)
 
   - script: |
       set -e
       {
-        echo "Load the agent at .github/agents/ally.md and run /ally feedback."
-        echo "Restrict the audit to only the changed files listed below. Respect"
+        echo "Load the agent at .github/agents/ally.md and run /ally diff $TARGET_REF_NAME."
+        echo "The files changed relative to that base branch are attached below —"
+        echo "use exactly this list as the diff scope; do not run git yourself to"
+        echo "recompute it. Restrict reported findings to changed hunks (±3 lines)"
+        echo "within these files, per the /ally diff command definition. Respect"
         echo ".allyconfig.json only after confirming it exists at the repo root;"
         echo "if it is missing, stop and report that the audit was skipped. Do"
         echo "not write or modify any files. Output the full findings report as"
@@ -76,14 +112,15 @@ steps:
         cat changed-files.txt
       } > ally-prompt.txt
 
-      if ! copilot -p "Load the agent at .github/agents/ally.md and run /ally feedback using the attached scope file." --attachment ally-prompt.txt --allow-tool search/codebase > ally-report.md; then
+      if ! copilot -p "Load the agent at .github/agents/ally.md and run /ally diff using the attached scope file." --attachment ally-prompt.txt --allow-tool search/codebase > ally-report.md; then
         printf '%s\n' 'Ally produced no output.' > ally-report.md
       fi
       cat ally-report.md
-    displayName: "Run Ally feedback"
+    displayName: "Run Ally diff audit"
     condition: eq(variables.hasChanges, 'true')
     env:
       GITHUB_TOKEN: $(COPILOT_GITHUB_TOKEN)
+      TARGET_REF_NAME: $(targetBranchName)
 
   - script: |
       set -e

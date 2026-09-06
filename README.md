@@ -7,9 +7,10 @@
 ## Features
 
 - 🔍 **Automated XAML accessibility audits** — scans active files or entire projects
-- 🌐 **Localization-first** — all generated strings use `x:Static` bindings; never hardcoded values
+- 🌐 **Localization-first** — all generated strings use a markup-extension binding to the resource class; never hardcoded values
 - 🛡️ **WCAG 2.2 AA enforcement** — rule catalog covering critical blockers through informational notes
 - ⚙️ **Configurable** — `.allyconfig.json` controls resource paths, key naming, severity gates, and exclusions
+- 🧩 **Optional `maui-accessibility` skill integration** — treated as the semantics authority when installed; falls back to built-in rules if missing or erroring
 - ✅ **Confirmation-gated writes** — nothing is written until you explicitly approve the apply checkpoint
 - 🔕 **Suppressions** — inline or config-level, always requiring a reason
 
@@ -47,6 +48,12 @@ The wizard asks **one question at a time** and detects your `.resx` resource fil
 /ally feedback
 ```
 
+**Audit only what changed, relative to a base branch:**
+
+```
+/ally diff main
+```
+
 **Audit + apply fixes:**
 
 ```
@@ -60,6 +67,7 @@ The wizard asks **one question at a time** and detects your `.resx` resource fil
 | Command | Description |
 |---|---|
 | `/ally feedback` | Read-only audit. Shows all findings with rule IDs, severity, and confidence. No files are written. |
+| `/ally diff [base-branch]` | Read-only, diff-scoped audit. Reports findings only for changed hunks (±3 lines) in files modified relative to `[base-branch]`. No files are written — the safe entry point for CI. |
 | `/ally config` | Interactive setup wizard. Detects `.resx` files, namespace aliases, and key naming conventions. Saves `.allyconfig.json`. |
 | `/ally apply` | Full audit with an apply checkpoint. Writes XAML and `.resx` changes only after you confirm. |
 
@@ -67,12 +75,11 @@ The wizard asks **one question at a time** and detects your `.resx` resource fil
 
 ## Running Ally in CI
 
-Ally can run in CI as a read-only check: it invokes `/ally feedback` against the files changed in a pull request and posts the findings as a PR comment. `/ally apply` is deliberately left out of automation — the apply checkpoint's confirmation step is a safety feature, not a formality, and there's no one in CI to confirm it. Always run `/ally apply` manually, locally.
+Ally can run in CI as a read-only check: it invokes `/ally diff` against a base branch, which reports findings only for changed hunks in the files a PR actually touches — not a full-repo `/ally feedback` pass. Both CI examples resolve the base branch from `.allyconfig.json`'s `defaultBaseBranch` when it's set, falling back to the PR's actual target branch otherwise — so if this repo's PRs sometimes target a branch other than `defaultBaseBranch` (e.g. a release branch), keep `defaultBaseBranch` in sync or unset it. Findings are posted as a PR comment. `/ally apply` is deliberately left out of automation — the apply checkpoint's confirmation step is a safety feature, not a formality, and there's no one in CI to confirm it. Always run `/ally apply` manually, locally.
 
 ### GitHub Actions
 
-1. Copy `.github/agents/ally.md` and `.allyconfig.json` into the target repository, at the same paths (repo root).
-   Run `/ally config` in the target repository first if `.allyconfig.json` does not already exist.
+1. Copy `.github/agents/ally.md` into the target repository, at the same path (`.github/agents/ally.md`). `.allyconfig.json` isn't something to copy from this template — it's project-specific. In the target repository, run `/ally config` (if it hasn't been already) to generate and commit one.
 2. Add a caller workflow that invokes the reusable workflow in this repo — see [`examples/github-actions/ally-audit-caller.yml`](examples/github-actions/ally-audit-caller.yml).
 3. **Auth:** the default `GITHUB_TOKEN` only works if the organization's Copilot policy allows "Allow use of Copilot CLI billed to the organization." Otherwise, create a PAT with the **Copilot Requests** permission and store it as a repository secret named `COPILOT_GITHUB_TOKEN`.
 
@@ -91,9 +98,11 @@ The wizard creates this file for you. A typical configuration looks like:
 
 ```json
 {
-  "resourceFile": "MyApp/Resources/AppResources.resx",
-  "namespaceAlias": "strings",
+  "localize": true,
+  "resxPath": "MyApp/Resources/AppResources.resx",
+  "localizeNamespace": "strings",
   "keyConvention": "Pascal_Underscore",
+  "defaultBaseBranch": "main",
   "failOn": "critical",
   "excludePaths": ["MyApp/Platforms/", "MyApp/obj/"],
   "readOnlyPaths": ["MyApp/Shared/ThirdParty/"],
@@ -105,12 +114,21 @@ The wizard creates this file for you. A typical configuration looks like:
 
 | Field | Type | Description |
 |---|---|---|
-| `resourceFile` | string | Path to the `.resx` file used for accessibility string keys. |
-| `constantsFile` | string | *(Alternative to `resourceFile`)* Path to a constants file when `localize: false`. |
+| `resxPath` | string | Path to the `.resx` file used for accessibility string keys. |
+| `constantsFile` | string | Path to a constants file. Required (alongside `localize: false`) when the project has no `.resx` file; optional supplement otherwise. |
+| `constantsClassPath` | string | Fully-qualified class path for the constants class (e.g. `CoreConstants.TranslationKeys`), when `constantsFile` is set. |
 | `localize` | boolean | `false` disables `.resx` key generation and fires `MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` for any hardcoded accessibility strings. |
-| `namespaceAlias` | string | The `xmlns:` alias used to reference the resource class in XAML (e.g. `strings`). |
-| `keyConvention` | string | `"Pascal_Underscore"` or a custom template. |
+| `localizeNamespace` | string | The `xmlns:` alias used to reference the localization markup extension in XAML (e.g. `strings`). |
+| `keyPrefix` | string | Prefix applied to generated `.resx` keys (e.g. `A11y`). |
+| `placeholderValue` | string | Placeholder value written for new `.resx` entries until translated. Defaults to `"TODO: add translation"`. |
+| `headingDefaultLevel` | string | Default `SemanticProperties.HeadingLevel` suggested for section titles (e.g. `"Level1"`). |
+| `keyConvention` | string | `"Pascal_Underscore"`, `"SCREAMING_SNAKE"`, `"dot.notation"`, or `"custom"` (with a `keyTemplate`). |
+| `constConvention` | string | Naming convention for generated C# constants (e.g. `"PascalCase"`). |
+| `orderDetection` | boolean | Enables heuristic detection of reading-order mismatches (`MAUI_A11Y_003_READING_ORDER`). |
+| `defaultBaseBranch` | string | Base branch `/ally diff` uses when `[base-branch]` is omitted (e.g. `"main"`). |
 | `failOn` | string | Minimum severity that fails a CI gate: `"critical"`, `"major"`, `"minor"`, or `"info"`. |
+| `mauiAccessibilitySkill` | object | Optional integration with a `maui-accessibility` skill: `enabled`, `skillName`, `required`, `fallbackOnMissing`, `fallbackOnError`. |
+| `rules` | object | Per-rule `enabled`/`severity` overrides, keyed by rule ID. |
 | `excludePaths` | string[] | Paths to skip entirely during scanning. |
 | `readOnlyPaths` | string[] | Paths that are reported but never written. |
 | `suppressions` | object[] | Rule suppressions with required `ruleId`, `path`, and `reason`. |
@@ -131,6 +149,22 @@ The wizard creates this file for you. A typical configuration looks like:
 | **High** | Included in proposed fixes; eligible for auto-apply |
 | **Medium** | Proposed but flagged "review recommended" |
 | **Low** | Reported only — never auto-applied |
+
+### Rule Catalog
+
+| Rule ID | Default Severity | Confidence | Description |
+|---|---|---|---|
+| `MAUI_A11Y_001_ICON_ONLY_TOOLBAR` | Critical | High | `ToolbarItem` / `ImageButton` has icon but no accessible name |
+| `MAUI_A11Y_002_LABEL_IN_NAME` | Major | High | Accessible name omits visible label text |
+| `MAUI_A11Y_003_READING_ORDER` | Major | Medium | Screen-reader order likely differs from visual order |
+| `MAUI_A11Y_004_INTERACTIVE_CONTAINER` | Critical | High | Gesture-only container may be the only way to act |
+| `MAUI_A11Y_005_MEANINGFUL_IMAGE_NO_DESCRIPTION` | Major | Medium | Meaningful image lacks alt text |
+| `MAUI_A11Y_006_ENTRY_DESCRIPTION_ANDROID` | Major | High | `Description` on `Entry`/`Editor` interferes with TalkBack |
+| `MAUI_A11Y_007_SLIDER_RANGE_MISSING` | Major | Medium | `Slider`/`Stepper` has no explicit range |
+| `MAUI_A11Y_008_HEADING_NOT_MARKED` | Minor | Low | Section title should have `HeadingLevel` |
+| `MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` | Minor | High | Accessibility text is hardcoded |
+| `MAUI_A11Y_010_CHECKBOX_NO_LABEL` | Major | High | `CheckBox`/`Switch`/`RadioButton` has no describing label |
+| `MAUI_A11Y_011_PICKER_TITLE_ONLY` | Major | Medium | `Picker` uses `Title` only; name may disappear after selection |
 
 ---
 
@@ -157,13 +191,14 @@ Nothing is written until you select **[A]** or **[B]**.
 
 ## Localization
 
-All generated accessibility strings are emitted as `x:Static` expressions:
+All generated accessibility strings are emitted through the configured
+localization markup extension (the `localizeNamespace` alias):
 
 ```xml
-SemanticProperties.Description="{x:Static strings:AppResources.A11y_NotesBtn_Description}"
+SemanticProperties.Description="{strings:Localize A11y_NotesBtn_Description}"
 ```
 
-New resource keys are added to the `.resx` file with the placeholder value `TODO: add translation`. The suggested English text appears in the audit report only — it is never committed to the `.resx` automatically.
+New resource keys are added to the `.resx` file with the placeholder value `TODO: add translation` (configurable via `placeholderValue`). The suggested English text appears in the audit report only — it is never committed to the `.resx` automatically.
 
 ---
 
@@ -203,6 +238,8 @@ The following rules are **always enforced** and cannot be overridden by confiden
 - **Icon-only controls** — `ToolbarItem` and `ImageButton` with no visible text must always have an accessible name.
 - **`SemanticProperties.IsInAccessibleTree` does not exist** — use `AutomationProperties.IsInAccessibleTree="False"` for single decorative elements, or `AutomationProperties.ExcludedWithChildren="True"` for decorative groups.
 - **`Placeholder` and `Hint`** — not combined blindly; they overlap on Android.
+- **Heading levels** — Windows/Narrator distinguishes `Level1`–`Level9`; Android/TalkBack and iOS/VoiceOver collapse them all to "heading."
+- **Dynamic announcements and focus** (`SemanticScreenReader.Announce(...)`, `SetSemanticFocus()`) are flow-dependent — Ally suggests them, but never adds them automatically.
 
 ---
 
