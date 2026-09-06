@@ -115,7 +115,11 @@ jobs:
             'within these files, per the /ally diff command definition. Respect' \
             '.allyconfig.json only after confirming it exists at the repo root;' \
             'if it is missing, stop and report that the audit was skipped. Do not' \
-            'write or modify any files. Output the full findings report as' \
+            'write or modify any files. Read every file in scope in full with' \
+            'your own tool before reporting anything about it — never rely on' \
+            'the filename or a typical file of this kind; every "Element" quote' \
+            'in your report must be verbatim from what you actually read, per' \
+            'the Hard rules in ally.md. Output the full findings report as' \
             'Markdown, following the "Findings Report Format" contract in' \
             'ally.md exactly (the FINDINGS_SUMMARY marker line and one' \
             '"### FINDING: <RULE_ID>" block per finding) — CI parses it' \
@@ -216,25 +220,35 @@ jobs:
 
             const blocks = report.split(/^###\s+FINDING:\s*/m).slice(1);
             for (const block of blocks) {
-              const blockLines = block.split(/\r?\n/);
-              const ruleId = blockLines[0].trim();
+              const titleLine = block.split(/\r?\n/, 1)[0].trim();
+              const ruleId = (titleLine.match(/^([A-Z0-9_]+)/) || ['', titleLine])[1];
+
               const fields = {};
-              for (const line of blockLines.slice(1)) {
-                const fieldMatch = line.match(/^(Severity|Confidence|File|Message|Suggested fix):\s*(.*)$/);
-                if (fieldMatch) fields[fieldMatch[1]] = fieldMatch[2].trim();
+              for (const rowMatch of block.matchAll(/^\|\s*([^|\n]+?)\s*\|\s*([^|\n]+?)\s*\|\s*$/gm)) {
+                const key = rowMatch[1].trim();
+                if (key.toLowerCase() === 'property' || /^-+$/.test(key)) continue;
+                fields[key] = rowMatch[2].trim();
               }
 
-              const severity = (fields.Severity || '').toLowerCase();
+              const problemMatch = block.match(/\*\*The Problem:\*\*\s*([\s\S]*?)(?=\n\*\*Fix:\*\*|$)/);
+              const fixMatch = block.match(/\*\*Fix:\*\*\s*([\s\S]*)$/);
+              const problem = problemMatch ? problemMatch[1].trim() : '';
+              const fix = fixMatch ? fixMatch[1].trim() : '';
+
+              const severity = (fields.Severity || '').replace(/[^a-z]/gi, '').toLowerCase();
               const icon = icons[severity] || '⚪';
-              const header = `${icon} **${ruleId}** (${fields.Severity || 'Unknown'}, ${fields.Confidence || 'unknown'} confidence)`;
-              const detailLines = [];
-              if (fields.Message) detailLines.push(`**Message:** ${fields.Message}`);
-              if (fields['Suggested fix']) detailLines.push(`**Suggested fix:** ${fields['Suggested fix']}`);
+              const header = `${icon} **${titleLine}** (${fields.Confidence || 'unknown'} confidence)`;
+              const elementLine = fields.Element ? [`> ${fields.Element}`, ''] : [];
+              const detailLines = [
+                ...elementLine,
+                ...(problem ? [`**The Problem:** ${problem}`, ''] : []),
+                ...(fix ? [`**Fix:**\n${fix}`] : []),
+              ];
 
               // Try to anchor the comment inline, on the exact file/line the
               // finding names — falls back to a plain issue comment (with
               // the file:line spelled out) whenever that's not possible:
-              // no File field, an unparseable one, or a line GitHub's API
+              // no File row, an unparseable one, or a line GitHub's API
               // rejects because it isn't part of this PR's diff (e.g. the
               // agent reported a line outside the ±3-line hunk window it's
               // supposed to stay within).

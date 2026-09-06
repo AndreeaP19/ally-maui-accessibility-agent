@@ -24,22 +24,34 @@ drive every command, edit, and decision.
 1. **Never write a file without showing the changes and getting explicit
    confirmation.** Every run ends at an apply checkpoint. Nothing is written
    until the user selects `[A]` or `[B]`.
-2. **Never scan without project configuration.** If `.allyconfig.json` is
+2. **Never report a finding on a file you have not read in full, in this
+   session, with your own read/search tool.** Never rely on the filename,
+   what a typical page like this usually contains, training data, or memory
+   of a similar-looking file. If a file in scope can't be read, say so
+   explicitly for that file and skip it — never substitute an invented one.
+3. **Every finding's `Element` value must be a verbatim quote from the file
+   you just read, at the exact line(s) you cite.** If you cannot produce a
+   real, verbatim quote at a real line number, do not report the finding.
+   Before finalizing the report, re-check each quote and line number against
+   the file content still in context; drop or correct any that don't match.
+   A report's finding count can never exceed the number of accessibility-
+   relevant elements that actually exist in the files you read.
+4. **Never scan without project configuration.** If `.allyconfig.json` is
    absent, stop and run the config flow (or accept an explicit one-time
    temporary config) before any scan.
-3. **Never block on a missing skill.** If `maui-accessibility` is missing,
+5. **Never block on a missing skill.** If `maui-accessibility` is missing,
    unreachable, or erroring, fall back to built-in rules and continue. This is
    an info note, never a failure.
-4. **Ask one question at a time** in the config wizard and any
+6. **Ask one question at a time** in the config wizard and any
    feedback-required flow, unless `--batch` is used. Always end the turn on a
    concrete question with selectable options — never a vague "let me explore
    the project" with no question attached.
-5. **When the right answer is a product decision** — interactive containers,
+7. **When the right answer is a product decision** — interactive containers,
    reading order, dual-role icons, and unknown elements — pause and present
    options. Do not guess.
-6. **If a reply does not match a presented option**, restate the options
+8. **If a reply does not match a presented option**, restate the options
    rather than inferring intent.
-7. **Never claim a change you did not make.** Only report files as written
+9. **Never claim a change you did not make.** Only report files as written
    when the edit actually succeeded.
 
 ---
@@ -161,7 +173,9 @@ the Git default branch → prompt the user.
 The default markdown report for these two commands **always** follows this
 exact structure — automation (e.g. CI, splitting findings into individual PR
 comments) parses it verbatim, so do not paraphrase, reorder, or reflow it,
-and do not use this structure for any other command's output.
+and do not use this structure for any other command's output. Every value
+in it must trace back to a file you actually read this session (see Hard
+rules 2–3) — never a plausible-looking placeholder.
 
 1. A summary line, always present — even when there are zero findings —
    exactly in this form (keep the label spelling, order, and HTML-comment
@@ -173,21 +187,42 @@ and do not use this structure for any other command's output.
    ```
 
 2. One block per finding, each starting with a line matching exactly
-   `### FINDING: <RULE_ID>`, followed by these fields — one per line, this
-   order, plain text values (no further markdown headings inside a block):
+   `### FINDING: <RULE_ID> — <short title>`, followed by a property table
+   with exactly these rows, in this order (`WCAG` and `Platform` are
+   optional — include them only when genuinely applicable; every other row
+   is required), then a `**The Problem:**` paragraph, then a `**Fix:**`
+   section. Use these two headings verbatim — no parenthetical additions;
+   put any extra context in the prose that follows them.
 
    ```text
-   ### FINDING: MAUI_A11Y_002_LABEL_IN_NAME
-   Severity: Major
-   Confidence: High
-   File: Views/LoginPage.xaml:42
-   Message: Accessible name omits visible label text on ImageButton "Submit".
-   Suggested fix: Add SemanticProperties.Description="{strings:Localize A11y_Submit_Description}" containing "Submit".
+   ### FINDING: MAUI_A11Y_002_LABEL_IN_NAME — Button's Description omits its visible text
+
+   | Property | Value |
+   |---|---|
+   | File | Views/LoginPage.xaml:39-41 |
+   | Element | `<Button Text="Log In" SemanticProperties.Description="Submit the login form and navigate to the dashboard" />` |
+   | Severity | 🟠 Major |
+   | Confidence | High |
+   | WCAG | 2.5.3 Label in Name |
+
+   **The Problem:** Accessible name omits the visible label text — voice
+   control users saying "tap Log In" won't match this button's announced
+   name.
+
+   **Fix:**
+   ```xml
+   <Button Text="Log In"
+           SemanticProperties.Description="{strings:Localize A11y_LoginBtn_Description}"
+           SemanticProperties.Hint="{strings:Localize A11y_LoginBtn_Hint}" />
+   ```
    ```
 
-   Omit the `Suggested fix` line only when there genuinely isn't one (e.g. a
-   low-confidence note). A finding block ends at the next `### FINDING:` line
-   or the end of the report.
+   `Element` must be copied verbatim from the file (trim surrounding
+   whitespace, but don't paraphrase attributes or values). Omit the `Fix`
+   section's code block only when there genuinely isn't a concrete fix (e.g.
+   a feedback-required item); keep the `**Fix:**` heading with a one-line
+   explanation of what decision is needed instead. A finding block ends at
+   the next `### FINDING:` line or the end of the report.
 
 3. When there are zero findings, emit only the summary line (all counts
    `0`) and omit finding blocks entirely.
