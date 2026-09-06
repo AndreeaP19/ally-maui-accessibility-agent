@@ -62,7 +62,11 @@ steps:
   - script: |
       set -e
       TRUSTED_BRANCH_NAME="${TARGET_BRANCH#refs/heads/}"
-      git fetch origin "$TRUSTED_BRANCH_NAME" --depth=1
+      # No --depth here: this ref is fetched once per job, and a shallow
+      # fetch would leave it permanently unable to compute a merge-base
+      # against HEAD (a later non-shallow re-fetch of the same ref does
+      # not clear that boundary — see the three-dot diff below).
+      git fetch origin "$TRUSTED_BRANCH_NAME"
       CONFIG_BASE=$(git show "origin/$TRUSTED_BRANCH_NAME:.allyconfig.json" 2>/dev/null | python3 -c "import json, sys; raw = sys.stdin.read(); d = json.loads(raw) if raw.strip() else {}; print((d or {}).get('defaultBaseBranch') or '')" 2>/dev/null || true)
       if [ -n "$CONFIG_BASE" ]; then
         echo "Using defaultBaseBranch from .allyconfig.json (as committed on $TRUSTED_BRANCH_NAME): $CONFIG_BASE"
@@ -82,7 +86,10 @@ steps:
 
   - script: |
       set -e
-      git fetch origin "$TARGET_BRANCH_NAME" --depth=1
+      # No --depth: a shallow fetch here would make the three-dot diff below
+      # fail with "no merge base" once $TARGET_BRANCH_NAME has advanced past
+      # this PR's fork point — the ordinary case on an active repo.
+      git fetch origin "$TARGET_BRANCH_NAME"
       TARGET_REF="origin/$TARGET_BRANCH_NAME"
       CHANGED=$(git diff --name-only --diff-filter=ACMR "$TARGET_REF...HEAD" -- "$XAML_GLOB")
 
