@@ -5,35 +5,21 @@
              Title="Profile">
     <VerticalStackLayout Padding="24" Spacing="16">
 
-        <!-- Deliberate violation: meaningful image with no accessible description.
-             Expected finding: MAUI_A11Y_005_MEANINGFUL_IMAGE_NO_DESCRIPTION -->
         <Image Source="avatar_placeholder.png"
                WidthRequest="80"
                HeightRequest="80"
-               HorizontalOptions="Center" />
+               HorizontalOptions="Center"
+               SemanticProperties.Description="User avatar placeholder" />
 
-        <!-- Deliberate violation: looks like a section title but has no
-             HeadingLevel set.
-             Expected finding: MAUI_A11Y_008_HEADING_NOT_MARKED -->
         <Label Text="Account Details"
                FontSize="20"
-               FontAttributes="Bold" />
+               FontAttributes="Bold"
+               SemanticProperties.HeadingLevel="Level1" />
 
-        <!-- Deliberate violation: describing Label declared after its
-             control — screen-reader reading order won't match the
-             intended visual/label association.
-             Expected finding: MAUI_A11Y_003_READING_ORDER -->
-        <Entry x:Name="PhoneEntry" Placeholder="Phone number" />
         <Label Text="Phone" FontSize="12" />
+        <Entry x:Name="PhoneEntry" Placeholder="Phone number" />
 
-        <!-- Deliberate violation: tap gesture on a container that also
-             holds an individually-focusable child (the Button) — dual
-             interaction paths with ambiguous semantics.
-             Expected finding: MAUI_A11Y_004_INTERACTIVE_CONTAINER -->
         <Frame x:Name="PlanCard" BorderColor="#DDDDDD" CornerRadius="8" Padding="16">
-            <Frame.GestureRecognizers>
-                <TapGestureRecognizer Tapped="OnPlanCardTapped" />
-            </Frame.GestureRecognizers>
             <VerticalStackLayout Spacing="4">
                 <Label Text="Pro Plan" FontAttributes="Bold" />
                 <Button Text="Manage" Clicked="OnManagePlanClicked" />
