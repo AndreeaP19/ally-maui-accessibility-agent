@@ -76,7 +76,9 @@ steps:
         cat changed-files.txt
       } > ally-prompt.txt
 
-      copilot -p "Load the agent at .github/agents/ally.md and run /ally feedback using the attached scope file." --attachment ally-prompt.txt --allow-tool search/codebase > ally-report.md
+      if ! copilot -p "Load the agent at .github/agents/ally.md and run /ally feedback using the attached scope file." --attachment ally-prompt.txt --allow-tool search/codebase > ally-report.md; then
+        printf '%s\n' 'Ally produced no output.' > ally-report.md
+      fi
       cat ally-report.md
     displayName: "Run Ally feedback"
     condition: eq(variables.hasChanges, 'true')

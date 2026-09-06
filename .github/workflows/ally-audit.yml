@@ -23,6 +23,8 @@ permissions:
 jobs:
   ally-audit:
     runs-on: ubuntu-latest
+    env:
+      COPILOT_CLI_VERSION: "1.0.83"
     steps:
       - name: Check out PR head
         uses: actions/checkout@v4
@@ -57,7 +59,7 @@ jobs:
 
       - name: Install GitHub Copilot CLI
         if: steps.diff.outputs.has_changes == 'true'
-        run: npm install -g @github/copilot@1.0.83
+        run: npm install -g @github/copilot@$COPILOT_CLI_VERSION
 
       - name: Run Ally feedback
         if: steps.diff.outputs.has_changes == 'true'
