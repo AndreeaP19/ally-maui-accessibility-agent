@@ -17,6 +17,15 @@ on:
 
 jobs:
   ally-audit:
+    # A reusable workflow can't be granted more than its caller allows — this
+    # job must explicitly request at least what ally-audit.yml itself needs
+    # (contents: read, pull-requests: write), since a repo's default token
+    # permissions (Settings > Actions > General > Workflow permissions) are
+    # often read-only and would otherwise cap it down to "none" and fail
+    # workflow validation before the job even starts.
+    permissions:
+      contents: read
+      pull-requests: write
     uses: ./.github/workflows/ally-audit.yml
     with:
       xaml-glob: "examples/sample-app/**/*.xaml"
