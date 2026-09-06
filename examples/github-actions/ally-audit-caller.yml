@@ -1,0 +1,13 @@
+name: Ally Accessibility Audit
+
+on:
+  pull_request:
+    paths: ["**/*.xaml"]
+
+jobs:
+  ally-audit:
+    # Pin this reusable workflow to a tag or commit SHA in production repos;
+    # @main can change without review.
+    uses: AndreeaP19/ally-maui-accessibility-agent/.github/workflows/ally-audit.yml@1d97e2dccd770298e1b85c5b55b02b1ed7ee12d0
+    secrets:
+      copilot-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}

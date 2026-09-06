@@ -1,0 +1,109 @@
+name: Ally Accessibility Audit
+
+on:
+  workflow_call:
+    inputs:
+      xaml-glob:
+        description: "Glob pattern (relative to repo root) for the XAML files Ally should audit."
+        required: false
+        type: string
+        default: "**/*.xaml"
+    secrets:
+      copilot-token:
+        description: >
+          GitHub PAT with the "Copilot Requests" permission. Required unless the
+          calling repo's organization allows GITHUB_TOKEN to bill Copilot CLI usage
+          to the organization, in which case this can be omitted.
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ally-audit:
+    runs-on: ubuntu-latest
+    env:
+      COPILOT_CLI_VERSION: "1.0.83"
+    steps:
+      - name: Check out PR head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find changed XAML files
+        id: diff
+        env:
+          XAML_GLOB: ${{ inputs.xaml-glob }}
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          CHANGED=$(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" -- "$XAML_GLOB")
+
+          if [ -z "$CHANGED" ]; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "files<<ALLY_DIFF_EOF"
+              echo "$CHANGED"
+              echo "ALLY_DIFF_EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node.js
+        if: steps.diff.outputs.has_changes == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install GitHub Copilot CLI
+        if: steps.diff.outputs.has_changes == 'true'
+        run: npm install -g @github/copilot@$COPILOT_CLI_VERSION
+
+      - name: Run Ally feedback
+        if: steps.diff.outputs.has_changes == 'true'
+        id: ally
+        env:
+          GITHUB_TOKEN: ${{ secrets.copilot-token || secrets.GITHUB_TOKEN }}
+          ALLY_CHANGED_FILES: ${{ steps.diff.outputs.files }}
+        run: |
+          printf '%s\n' \
+            'Load the agent at .github/agents/ally.md and run /ally feedback.' \
+            'Restrict the audit to only the changed files listed below. Respect' \
+            '.allyconfig.json only after confirming it exists at the repo root;' \
+            'if it is missing, stop and report that the audit was skipped. Do not' \
+            'write or modify any files. Output the full findings report as' \
+            'Markdown.' \
+            '' \
+            'Changed files:' \
+            > ally-prompt.txt
+          echo "$ALLY_CHANGED_FILES" >> ally-prompt.txt
+
+          copilot -p "Load the agent at .github/agents/ally.md and run /ally feedback using the attached scope file." --attachment ally-prompt.txt --allow-tool search/codebase > ally-report.md
+
+      - name: Post PR comment
+        if: steps.diff.outputs.has_changes == 'true'
+        uses: actions/github-script@v7
+        env:
+          ALLY_REPORT_PATH: ally-report.md
+        with:
+          script: |
+            const fs = require('fs');
+            const path = process.env.ALLY_REPORT_PATH;
+            const report = fs.existsSync(path)
+              ? fs.readFileSync(path, 'utf8')
+              : 'Ally produced no output.';
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## 🔍 Ally Accessibility Audit\n\n${report}`,
+            });
+
+      - name: No XAML changes
+        if: steps.diff.outputs.has_changes != 'true'
+        env:
+          XAML_GLOB: ${{ inputs.xaml-glob }}
+        run: echo "No files matching \"$XAML_GLOB\" changed in this PR — skipping audit."
