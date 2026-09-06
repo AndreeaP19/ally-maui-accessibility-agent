@@ -145,14 +145,14 @@ The wizard creates this file for you. A typical configuration looks like:
 | `resxPath` | string | Path to the `.resx` file used for accessibility string keys. |
 | `constantsFile` | string | Path to a constants file. Required (alongside `localize: false`) when the project has no `.resx` file; optional supplement otherwise. |
 | `constantsClassPath` | string | Fully-qualified class path for the constants class (e.g. `CoreConstants.TranslationKeys`), when `constantsFile` is set. |
-| `localize` | boolean | `false` disables `.resx` key generation and fires `MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` for any hardcoded accessibility strings. |
+| `localize` | boolean | `false` disables `.resx` key generation — Ally itself then emits plain string literals for any new property it adds, instead of a markup-extension binding. `MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` fires the other way around: when `true` and an *existing* string bypasses the localization markup extension, since that's a live deviation from the project's own policy. |
 | `localizeNamespace` | string | The `xmlns:` alias used to reference the localization markup extension in XAML (e.g. `strings`). |
 | `keyPrefix` | string | Prefix applied to generated `.resx` keys (e.g. `A11y`). |
 | `placeholderValue` | string | Placeholder value written for new `.resx` entries until translated. Defaults to `"TODO: add translation"`. |
 | `headingDefaultLevel` | string | Default `SemanticProperties.HeadingLevel` suggested for section titles (e.g. `"Level1"`). |
 | `keyConvention` | string | `"Pascal_Underscore"`, `"SCREAMING_SNAKE"`, `"dot.notation"`, or `"custom"` (with a `keyTemplate`). |
 | `constConvention` | string | Naming convention for generated C# constants (e.g. `"PascalCase"`). |
-| `orderDetection` | boolean | Enables heuristic detection of reading-order mismatches (`MAUI_A11Y_003_READING_ORDER`). |
+| `orderDetection` | boolean | Opt-in, off by default. Set to `true` to enable heuristic detection of reading-order mismatches (`MAUI_A11Y_003_READING_ORDER`) — `Grid.Row`/`Grid.Column` visual order differing from declaration order, a describing `Label` declared after its control, or absolute/translation-based visual reordering. Left unset or `false`, Ally never fires that rule, even if one of those patterns is present. |
 | `defaultBaseBranch` | string | Base branch `/ally diff` uses when `[base-branch]` is omitted (e.g. `"main"`). |
 | `failOn` | string | Minimum severity that fails a CI gate: `"critical"`, `"major"`, `"minor"`, or `"info"`. |
 | `mauiAccessibilitySkill` | object | Optional integration with a `maui-accessibility` skill: `enabled`, `skillName`, `required`, `fallbackOnMissing`, `fallbackOnError`. |
