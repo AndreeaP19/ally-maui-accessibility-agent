@@ -122,8 +122,7 @@ jobs:
           fi
           printf '%s\n' \
             "Load the agent at .github/agents/ally.md and run /ally diff ${BASE_REF}." \
-            'This is a non-interactive run (see "Interactive vs. Non-Interactive' \
-            'Runs" in ally.md) — never pause for a feedback-required decision;' \
+            'This is a non-interactive run (see "Interactive vs. Non-Interactive Runs" in ally.md) — never pause for a feedback-required decision;' \
             'report it as an ordinary finding instead, per that section. The' \
             'files changed relative to that base branch are listed below — use' \
             'exactly this list as the diff scope; do not run git yourself to' \

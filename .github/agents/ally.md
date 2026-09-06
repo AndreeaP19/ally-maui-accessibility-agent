@@ -894,7 +894,8 @@ public const string A11ySaveBtnDescription = "A11y_SaveBtn_Description";
 semantic property Ally itself adds, it emits a plain string literal
 instead of a markup-extension binding, matching the project's chosen
 non-localized convention. This is about what Ally writes, not a blanket
-exemption for existing code: it doesn't stop `MAUI_A11Y_009` from firing.
+exemption for existing code: it does not exempt an existing accessibility
+string from `MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` when `localize: true`.
 
 **`MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` fires independently of emission
 mode**, whenever `localize: true` and an *existing* accessibility-relevant
