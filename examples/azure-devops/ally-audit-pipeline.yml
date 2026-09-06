@@ -45,8 +45,8 @@ steps:
 
   - script: |
       set -e
-      git fetch origin "$(System.PullRequest.TargetBranch)" --depth=1
-      TARGET_REF="origin/$(echo $(System.PullRequest.TargetBranch) | sed 's#refs/heads/##')"
+      git fetch origin "$TARGET_BRANCH" --depth=1
+      TARGET_REF="origin/${TARGET_BRANCH#refs/heads/}"
       CHANGED=$(git diff --name-only --diff-filter=ACMR "$TARGET_REF...HEAD" -- "$XAML_GLOB")
 
       if [ -z "$CHANGED" ]; then
@@ -58,6 +58,7 @@ steps:
       cat changed-files.txt
     displayName: "Find changed XAML files"
     env:
+      TARGET_BRANCH: $(System.PullRequest.TargetBranch)
       XAML_GLOB: $(xamlGlob)
 
   - script: |
@@ -88,12 +89,12 @@ steps:
       else
         REPORT_JSON=$(python3 -c "import json; print(json.dumps('Ally produced no output.'))")
       fi
-      BODY=$(printf '{"comments":[{"parentCommentId":0,"content":%s,"commentType":1}],"status":1}' "$REPORT_JSON")
 
+      printf '{"comments":[{"parentCommentId":0,"content":%s,"commentType":1}],"status":1}' "$REPORT_JSON" | \
       curl -sS -f -u ":$SYSTEM_ACCESSTOKEN" \
         -H "Content-Type: application/json" \
         -X POST \
-        --data "$BODY" \
+        --data @- \
         "$(System.CollectionUri)$(System.TeamProject)/_apis/git/repositories/$(Build.Repository.Name)/pullRequests/$(System.PullRequest.PullRequestId)/threads?api-version=7.1"
     displayName: "Post PR comment"
     condition: eq(variables.hasChanges, 'true')
