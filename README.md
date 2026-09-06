@@ -48,6 +48,12 @@ The wizard asks **one question at a time** and detects your `.resx` resource fil
 /ally feedback
 ```
 
+**Audit only what changed, relative to a base branch:**
+
+```
+/ally diff main
+```
+
 **Audit + apply fixes:**
 
 ```
@@ -61,6 +67,7 @@ The wizard asks **one question at a time** and detects your `.resx` resource fil
 | Command | Description |
 |---|---|
 | `/ally feedback` | Read-only audit. Shows all findings with rule IDs, severity, and confidence. No files are written. |
+| `/ally diff [base-branch]` | Read-only, diff-scoped audit. Reports findings only for changed hunks (±3 lines) in files modified relative to `[base-branch]`. No files are written — the safe entry point for CI. |
 | `/ally config` | Interactive setup wizard. Detects `.resx` files, namespace aliases, and key naming conventions. Saves `.allyconfig.json`. |
 | `/ally apply` | Full audit with an apply checkpoint. Writes XAML and `.resx` changes only after you confirm. |
 
@@ -68,7 +75,7 @@ The wizard asks **one question at a time** and detects your `.resx` resource fil
 
 ## Running Ally in CI
 
-Ally can run in CI as a read-only check: it invokes `/ally feedback` against the files changed in a pull request and posts the findings as a PR comment. `/ally apply` is deliberately left out of automation — the apply checkpoint's confirmation step is a safety feature, not a formality, and there's no one in CI to confirm it. Always run `/ally apply` manually, locally.
+Ally can run in CI as a read-only check: it invokes `/ally diff` against the pull request's base branch, which reports findings only for changed hunks in the files a PR actually touches — not a full-repo `/ally feedback` pass. Findings are posted as a PR comment. `/ally apply` is deliberately left out of automation — the apply checkpoint's confirmation step is a safety feature, not a formality, and there's no one in CI to confirm it. Always run `/ally apply` manually, locally.
 
 ### GitHub Actions
 
@@ -96,6 +103,7 @@ The wizard creates this file for you. A typical configuration looks like:
   "resxPath": "MyApp/Resources/AppResources.resx",
   "localizeNamespace": "strings",
   "keyConvention": "Pascal_Underscore",
+  "defaultBaseBranch": "main",
   "failOn": "critical",
   "excludePaths": ["MyApp/Platforms/", "MyApp/obj/"],
   "readOnlyPaths": ["MyApp/Shared/ThirdParty/"],
@@ -118,6 +126,7 @@ The wizard creates this file for you. A typical configuration looks like:
 | `keyConvention` | string | `"Pascal_Underscore"`, `"SCREAMING_SNAKE"`, `"dot.notation"`, or `"custom"` (with a `keyTemplate`). |
 | `constConvention` | string | Naming convention for generated C# constants (e.g. `"PascalCase"`). |
 | `orderDetection` | boolean | Enables heuristic detection of reading-order mismatches (`MAUI_A11Y_003_READING_ORDER`). |
+| `defaultBaseBranch` | string | Base branch `/ally diff` uses when `[base-branch]` is omitted (e.g. `"main"`). |
 | `failOn` | string | Minimum severity that fails a CI gate: `"critical"`, `"major"`, `"minor"`, or `"info"`. |
 | `mauiAccessibilitySkill` | object | Optional integration with a `maui-accessibility` skill: `enabled`, `skillName`, `required`, `fallbackOnMissing`, `fallbackOnError`. |
 | `rules` | object | Per-rule `enabled`/`severity` overrides, keyed by rule ID. |

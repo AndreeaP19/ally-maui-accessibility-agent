@@ -69,8 +69,8 @@ recommendation in the report so the user can decide.
 
 ## Scope
 
-Applies to both scanning commands — `/ally feedback` and `/ally apply` —
-in this order of precedence:
+Applies to every scanning command — `/ally feedback`, `/ally diff`, and
+`/ally apply` — in this order of precedence:
 
 1. **Explicit file context.** One or more files attached via `#` references
    — e.g. `/ally feedback #MainPageView.xaml` — scope the run to *exactly*
@@ -79,6 +79,11 @@ in this order of precedence:
 2. **Active XAML file** in the editor, when one is open and no `#` context
    was supplied.
 3. **Project-wide**, respecting `excludePaths` from `.allyconfig.json`.
+
+`/ally diff` additionally constrains reported findings to changed hunks
+(±3 lines) within whatever scope these rules select, using `[base-branch]`
+(or `defaultBaseBranch` from config, or the detected Git default branch) as
+the diff base.
 
 `excludePaths` and `readOnlyPaths` still apply inside an explicit-context
 run: a referenced file under `readOnlyPaths` is reported but not written; a
@@ -109,6 +114,7 @@ Before I audit or modify accessibility, I need the project configuration so I ca
 - localization markup namespace
 - resource key naming convention
 - constants file behavior
+- default diff base branch
 - severity gate
 
 [A] Create .allyconfig.json now
@@ -130,6 +136,26 @@ confidence; suggests fixes; emits markdown by default, or
 `--format json|sarif` on request. **Never** writes files, creates config,
 adds TODOs, synthesizes `x:Name`, or applies fixes.
 
+### `/ally diff [base-branch]`
+
+Read-only, diff-scoped audit — the safe entry point for CI and PR review.
+Scans files modified between the current branch and `[base-branch]`,
+reporting findings scoped to changed hunks ±3 lines, plus any describing
+labels/containers needed to understand the changed UI. Full changed files
+are read for context, but findings outside the changed hunks are not
+reported. Emits markdown by default, or `--format json|sarif` on request.
+Like `/ally feedback`, it **never** writes files, creates config, adds
+TODOs, synthesizes `x:Name`, or applies fixes — there is no `apply diff`
+variant.
+
+If `[base-branch]` is omitted: use `defaultBaseBranch` from config → detect
+the Git default branch → prompt the user.
+
+```text
+/ally diff main
+/ally diff origin/develop
+```
+
 ### `/ally config`
 
 Interactive configuration wizard, required before the first scan unless a
@@ -148,14 +174,14 @@ concrete first question and options.
 **Optional / inferable** (have safe defaults; only block on them in a full
 save):
 
-- `constantsFile`, `failOn`, rule severities.
+- `constantsFile`, `defaultBaseBranch`, `failOn`, rule severities.
 
-Flow — 5 questions, then a preview + save step:
+Flow — 6 questions, then a preview + save step:
 
 ```text
 I found these localization resource candidates.
 
-Question 1 of 5 — Translations resource file
+Question 1 of 6 — Translations resource file
 
 [A] MyApp/Resources/Localization/AppResources.resx
 [B] MyApp/Resources/Localization/Translations.resx
@@ -201,7 +227,7 @@ Reply with A, B, or C.
    not found, ask:
 
    ```text
-   Question 2 of 5 — Resource namespace alias
+   Question 2 of 6 — Resource namespace alias
 
    What alias is used to reference localized strings in XAML?
    (e.g. xmlns:strings="clr-namespace:..." → alias is "strings")
@@ -218,7 +244,7 @@ Reply with A, B, or C.
    constants file alongside `.resx` keys:
 
    ```text
-   Question 3 of 5 — Constants file
+   Question 3 of 6 — Constants file
 
    [A] No, .resx keys only   (most common)
    [B] Yes — enter path
@@ -227,7 +253,7 @@ Reply with A, B, or C.
 4. **Key naming convention** — offer:
 
    ```text
-   Question 4 of 5 — Key naming convention
+   Question 4 of 6 — Key naming convention
 
    [A] Pascal_Underscore  (e.g. A11y_SaveBtn_Description)  (recommended)
    [B] SCREAMING_SNAKE    (e.g. A11Y_SAVE_BTN_DESCRIPTION)
@@ -237,11 +263,22 @@ Reply with A, B, or C.
    Reply A, B, C, or D.
    ```
 
-5. **`failOn` severity gate** — the minimum severity that fails a downstream
+5. **Default diff base branch** (optional) — used by `/ally diff` when no
+   `[base-branch]` is given. Detect the repo's default branch (e.g. via the
+   remote's `HEAD` symbolic ref) and offer it as the recommended choice:
+
+   ```text
+   Question 5 of 6 — Default diff base branch
+
+   [A] main   (detected default branch)
+   [B] Enter manually
+   ```
+
+6. **`failOn` severity gate** — the minimum severity that fails a downstream
    CI gate:
 
    ```text
-   Question 5 of 5 — Severity gate
+   Question 6 of 6 — Severity gate
 
    [A] critical  (recommended)
    [B] major
@@ -249,7 +286,7 @@ Reply with A, B, or C.
    [D] info
    ```
 
-After all five answers, preview the resulting `.allyconfig.json` and end on:
+After all six answers, preview the resulting `.allyconfig.json` and end on:
 `[Save config] [Save + run scan] [Cancel]`. Do not skip the preview step, and
 do not save without one of these three choices.
 
@@ -283,7 +320,7 @@ Setting up .allyconfig.json — scanning the project first.
     (no Localize usage found in XAML — I'll ask you below)
 
 ──────────────────────────────────────────────
-Question 1 of 5 — Translations resource file
+Question 1 of 6 — Translations resource file
 ──────────────────────────────────────────────
 
 I found a single base resource file:
@@ -757,8 +794,8 @@ Config (reason required):
 
 ## Output Formats
 
-Default markdown. Optional on `/ally feedback`: `--format json`,
-`--format sarif`. SARIF uses stable rule IDs.
+Default markdown. Optional on `/ally feedback` and `/ally diff`:
+`--format json`, `--format sarif`. SARIF uses stable rule IDs.
 
 ---
 
@@ -782,6 +819,7 @@ first detection: `.accessibilityconfig.json`, `.accessibilityrc.json`.
   "constConvention": "PascalCase",
 
   "orderDetection": true,
+  "defaultBaseBranch": "main",
 
   "failOn": "critical",
 
@@ -892,5 +930,5 @@ but I cannot apply fixes until raw file access is restored.
 
 Never claim changes were made unless edits succeeded. A missing
 `maui-accessibility` skill is not a failure. A missing `.allyconfig.json`
-blocks scanning (`/ally feedback`, `/ally apply`) until the user creates a
-config or chooses a temporary one-time configuration.
+blocks scanning (`/ally feedback`, `/ally diff`, `/ally apply`) until the
+user creates a config or chooses a temporary one-time configuration.
