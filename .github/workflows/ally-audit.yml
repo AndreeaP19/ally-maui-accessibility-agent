@@ -211,6 +211,9 @@ jobs:
                 : `## 🔍 Ally Accessibility Audit\n\nFindings by severity: ${summaryLine}`,
             });
 
+            const pull_number = context.issue.number;
+            const commit_id = context.payload.pull_request.head.sha;
+
             const blocks = report.split(/^###\s+FINDING:\s*/m).slice(1);
             for (const block of blocks) {
               const blockLines = block.split(/\r?\n/);
@@ -223,20 +226,48 @@ jobs:
 
               const severity = (fields.Severity || '').toLowerCase();
               const icon = icons[severity] || '⚪';
-              const bodyLines = [
-                `${icon} **${ruleId}** (${fields.Severity || 'Unknown'}, ${fields.Confidence || 'unknown'} confidence)`,
-                '',
-              ];
-              if (fields.File) bodyLines.push(`**File:** ${fields.File}`);
-              if (fields.Message) bodyLines.push(`**Message:** ${fields.Message}`);
-              if (fields['Suggested fix']) bodyLines.push(`**Suggested fix:** ${fields['Suggested fix']}`);
+              const header = `${icon} **${ruleId}** (${fields.Severity || 'Unknown'}, ${fields.Confidence || 'unknown'} confidence)`;
+              const detailLines = [];
+              if (fields.Message) detailLines.push(`**Message:** ${fields.Message}`);
+              if (fields['Suggested fix']) detailLines.push(`**Suggested fix:** ${fields['Suggested fix']}`);
 
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: bodyLines.join('\n'),
-              });
+              // Try to anchor the comment inline, on the exact file/line the
+              // finding names — falls back to a plain issue comment (with
+              // the file:line spelled out) whenever that's not possible:
+              // no File field, an unparseable one, or a line GitHub's API
+              // rejects because it isn't part of this PR's diff (e.g. the
+              // agent reported a line outside the ±3-line hunk window it's
+              // supposed to stay within).
+              const fileMatch = (fields.File || '').match(/^(.+?):(\d+)(?:-\d+)?\s*$/);
+              let postedInline = false;
+              if (fileMatch) {
+                const [, path, line] = fileMatch;
+                try {
+                  await github.rest.pulls.createReviewComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number,
+                    commit_id,
+                    path,
+                    line: parseInt(line, 10),
+                    side: 'RIGHT',
+                    body: [header, '', ...detailLines].join('\n'),
+                  });
+                  postedInline = true;
+                } catch (err) {
+                  core.warning(`Could not anchor ${ruleId} to ${fields.File}: ${err.message}`);
+                }
+              }
+
+              if (!postedInline) {
+                const fileLine = fields.File ? [`**File:** ${fields.File}`, ''] : [];
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: [header, '', ...fileLine, ...detailLines].join('\n'),
+                });
+              }
             }
 
             const failOn = (process.env.ALLY_FAIL_ON || 'critical').toLowerCase();
