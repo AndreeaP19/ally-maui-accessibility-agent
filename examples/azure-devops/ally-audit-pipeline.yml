@@ -77,9 +77,10 @@ steps:
 
   - script: |
       set -e
-      # No --depth: a shallow fetch here would make the three-dot diff below
-      # fail with "no merge base" once $TARGET_BRANCH_NAME has advanced past
-      # this PR's fork point — the ordinary case on an active repo.
+      TARGET_BRANCH_NAME="${TARGET_BRANCH_NAME#refs/heads/}"
+      TARGET_BRANCH_NAME="${TARGET_BRANCH_NAME#origin/}"
+      # No --depth: a shallow fetch here can't be undone by a later plain
+      # re-fetch, and would break the merge-base diff below.
       git fetch origin "$TARGET_BRANCH_NAME"
       TARGET_REF="origin/$TARGET_BRANCH_NAME"
       CHANGED=$(git diff --name-only --diff-filter=ACMR "$TARGET_REF...HEAD" -- "$XAML_GLOB")

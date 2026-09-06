@@ -64,9 +64,10 @@ jobs:
           XAML_GLOB: ${{ inputs.xaml-glob }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          # No --depth: a shallow fetch here would make the three-dot diff
-          # below fail with "no merge base" once $BASE_REF has advanced past
-          # this PR's fork point — the ordinary case on an active repo.
+          BASE_REF="${BASE_REF#refs/heads/}"
+          BASE_REF="${BASE_REF#origin/}"
+          # No --depth: a shallow fetch here can't be undone by a later
+          # plain re-fetch, and would break the merge-base diff below.
           git fetch origin "$BASE_REF"
           CHANGED=$(git diff --name-only --diff-filter=ACMR "origin/$BASE_REF...HEAD" -- "$XAML_GLOB")
 
