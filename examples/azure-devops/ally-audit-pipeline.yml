@@ -39,14 +39,14 @@ steps:
       versionSpec: "20.x"
     displayName: "Use Node.js 20"
 
-  - script: npm install -g @github/copilot
+  - script: npm install -g @github/copilot@1.0.83
     displayName: "Install GitHub Copilot CLI"
 
   - script: |
       set -e
       git fetch origin "$(System.PullRequest.TargetBranch)" --depth=1
       TARGET_REF="origin/$(echo $(System.PullRequest.TargetBranch) | sed 's#refs/heads/##')"
-      CHANGED=$(git diff --name-only --diff-filter=ACMR "$TARGET_REF...HEAD" -- "$(xamlGlob)")
+      CHANGED=$(git diff --name-only --diff-filter=ACMR "$TARGET_REF...HEAD" -- "$XAML_GLOB")
 
       if [ -z "$CHANGED" ]; then
         echo "##vso[task.setvariable variable=hasChanges]false"
@@ -56,6 +56,8 @@ steps:
       echo "$CHANGED" > changed-files.txt
       cat changed-files.txt
     displayName: "Find changed XAML files"
+    env:
+      XAML_GLOB: $(xamlGlob)
 
   - script: |
       set -e
