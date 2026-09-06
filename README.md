@@ -152,7 +152,7 @@ The wizard creates this file for you. A typical configuration looks like:
 | `headingDefaultLevel` | string | Default `SemanticProperties.HeadingLevel` suggested for section titles (e.g. `"Level1"`). |
 | `keyConvention` | string | `"Pascal_Underscore"`, `"SCREAMING_SNAKE"`, `"dot.notation"`, or `"custom"` (with a `keyTemplate`). |
 | `constConvention` | string | Naming convention for generated C# constants (e.g. `"PascalCase"`). |
-| `orderDetection` | boolean | Enables heuristic detection of reading-order mismatches (`MAUI_A11Y_003_READING_ORDER`). |
+| `orderDetection` | boolean | Opt-in, off by default. Set to `true` to enable heuristic detection of reading-order mismatches (`MAUI_A11Y_003_READING_ORDER`) — `Grid.Row`/`Grid.Column` visual order differing from declaration order, a describing `Label` declared after its control, or absolute/translation-based visual reordering. Left unset or `false`, Ally never fires that rule, even if one of those patterns is present. |
 | `defaultBaseBranch` | string | Base branch `/ally diff` uses when `[base-branch]` is omitted (e.g. `"main"`). |
 | `failOn` | string | Minimum severity that fails a CI gate: `"critical"`, `"major"`, `"minor"`, or `"info"`. |
 | `mauiAccessibilitySkill` | object | Optional integration with a `maui-accessibility` skill: `enabled`, `skillName`, `required`, `fallbackOnMissing`, `fallbackOnError`. |
