@@ -81,7 +81,10 @@ Ally can run in CI as a read-only check: it invokes `/ally diff` against the pul
 
 1. Copy `.github/agents/ally.md` into the target repository, at the same path (`.github/agents/ally.md`). `.allyconfig.json` isn't something to copy from this template — it's project-specific. In the target repository, run `/ally config` (if it hasn't been already) to generate and commit one.
 2. Add a caller workflow that invokes the reusable workflow in this repo — see [`examples/github-actions/ally-audit-caller.yml`](examples/github-actions/ally-audit-caller.yml).
-3. **Auth:** the default `GITHUB_TOKEN` only works if the organization's Copilot policy allows "Allow use of Copilot CLI billed to the organization." Otherwise, create a PAT with the **Copilot Requests** permission and store it as a repository secret named `COPILOT_GITHUB_TOKEN`.
+3. In the caller job, include:
+   - `permissions: { contents: read, pull-requests: write, copilot-requests: write }`
+   - no `secrets:` mapping for `copilot-token` (the reusable workflow already uses `github.token` when no secret is provided).
+4. **Auth:** the default `GITHUB_TOKEN` only works if the organization's Copilot policy allows "Allow use of Copilot CLI billed to the organization." Otherwise, create a PAT with the **Copilot Requests** permission and pass it via the optional reusable-workflow secret `copilot-token` (for example from a repository secret such as `COPILOT_GITHUB_TOKEN`).
 
 ### Azure DevOps
 
