@@ -85,12 +85,14 @@ Ally can run in CI as a read-only check: it invokes `/ally diff` against the pul
    - `permissions: { contents: read, pull-requests: write, copilot-requests: write }`
    - no `secrets:` mapping for `copilot-token` (the reusable workflow already uses `github.token` when no secret is provided).
 4. **Auth:** the default `GITHUB_TOKEN` only works if the organization's Copilot policy allows "Allow use of Copilot CLI billed to the organization." Otherwise, create a PAT with the **Copilot Requests** permission and pass it via the optional reusable-workflow secret `copilot-token` (for example from a repository secret such as `COPILOT_GITHUB_TOKEN`).
+5. **Model selection:** by default, `copilot` uses your Copilot backend/org policy defaults. To pin a specific model for CI, pass it explicitly in the CLI command (for example `--model gpt-5.3-codex`).
 
 ### Azure DevOps
 
 See [`examples/azure-devops/ally-audit-pipeline.yml`](examples/azure-devops/ally-audit-pipeline.yml).
 
 - **Auth** always requires a GitHub PAT — Copilot billing is GitHub-side regardless of which CI host runs the pipeline — stored as a secret pipeline variable.
+- **Model selection** defaults to your Copilot backend/org policy. To force a specific model in CI, add `--model <model-id>` to the `copilot` command (for example `--model gpt-5.3-codex`).
 - Enable **"Allow scripts to access the OAuth token"** on the pipeline and grant the **Build Service** identity **"Contribute to pull requests"**, or the PR comment step will fail.
 
 ### Sample app (CI self-test)
