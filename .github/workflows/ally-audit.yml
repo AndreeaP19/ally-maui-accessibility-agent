@@ -103,7 +103,7 @@ jobs:
         if: steps.diff.outputs.has_changes == 'true'
         id: ally
         env:
-          GITHUB_TOKEN: ${{ secrets.copilot-token || github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
           ALLY_CHANGED_FILES: ${{ steps.diff.outputs.files }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
@@ -152,12 +152,11 @@ jobs:
               header = '## ⚠️ Ally audit failed to run';
               const details = `<details><summary>Raw output</summary>\n\n\`\`\`\n${report}\n\`\`\`\n</details>`;
               body = /authentication failed/i.test(report)
-                ? 'The Copilot CLI could not authenticate. This repository is likely missing a ' +
-                  'working Copilot token.\n\n**Fix:** create a GitHub PAT with the **Copilot ' +
-                  'Requests** permission and add it as a repository secret named ' +
-                  '`COPILOT_GITHUB_TOKEN`, or enable "Allow use of Copilot CLI billed to the ' +
-                  'organization" in your org\'s Copilot policy — see the "Running Ally in CI" ' +
-                  `section of README.md.\n\n${details}`
+                ? 'The Copilot CLI could not authenticate. This workflow may be missing the ' +
+                  '`copilot-requests: write` permission required to use the job\'s automatic ' +
+                  '`GITHUB_TOKEN` for Copilot CLI authentication.\n\n**Fix:** grant ' +
+                  '`copilot-requests: write` in the workflow/job permissions and re-run the audit.\n\n' +
+                  `${details}`
                 : `Ally exited with an error (exit code ${exitCode}). See the workflow run logs ` +
                   `for details.\n\n${details}`;
             }
