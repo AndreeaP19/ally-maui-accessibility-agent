@@ -65,6 +65,25 @@ The wizard asks **one question at a time** and detects your `.resx` resource fil
 
 ---
 
+## Running Ally in CI
+
+Ally can run in CI as a read-only check: it invokes `/ally feedback` against the files changed in a pull request and posts the findings as a PR comment. `/ally apply` is deliberately left out of automation — the apply checkpoint's confirmation step is a safety feature, not a formality, and there's no one in CI to confirm it. Always run `/ally apply` manually, locally.
+
+### GitHub Actions
+
+1. Copy `.github/agents/ally.md` and `.allyconfig.json` into the target repository, at the same paths (repo root).
+2. Add a caller workflow that invokes the reusable workflow in this repo — see [`examples/github-actions/ally-audit-caller.yml`](examples/github-actions/ally-audit-caller.yml).
+3. **Auth:** the default `GITHUB_TOKEN` only works if the organization's Copilot policy allows "Allow use of Copilot CLI billed to the organization." Otherwise, create a PAT with the **Copilot Requests** permission and store it as a repository secret named `COPILOT_GITHUB_TOKEN`.
+
+### Azure DevOps
+
+See [`examples/azure-devops/ally-audit-pipeline.yml`](examples/azure-devops/ally-audit-pipeline.yml).
+
+- **Auth** always requires a GitHub PAT — Copilot billing is GitHub-side regardless of which CI host runs the pipeline — stored as a secret pipeline variable.
+- Enable **"Allow scripts to access the OAuth token"** on the pipeline and grant the **Build Service** identity **"Contribute to pull requests"**, or the PR comment step will fail.
+
+---
+
 ## Configuration — `.allyconfig.json`
 
 The wizard creates this file for you. A typical configuration looks like:

@@ -1,0 +1,11 @@
+name: Ally Accessibility Audit
+
+on:
+  pull_request:
+    paths: ["**/*.xaml"]
+
+jobs:
+  ally-audit:
+    uses: AndreeaP19/ally-maui-accessibility-agent/.github/workflows/ally-audit.yml@main
+    secrets:
+      copilot-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
