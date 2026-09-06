@@ -28,6 +28,7 @@ pool:
 
 variables:
   xamlGlob: "**/*.xaml"
+  copilotCliVersion: "1.0.83"
 
 steps:
   - checkout: self
@@ -40,7 +41,7 @@ steps:
     displayName: "Use Node.js 20"
 
   # Keep this version aligned with .github/workflows/ally-audit.yml.
-  - script: npm install -g @github/copilot@1.0.83
+  - script: npm install -g @github/copilot@$(copilotCliVersion)
     displayName: "Install GitHub Copilot CLI"
 
   - script: |
@@ -100,7 +101,8 @@ steps:
         echo "url = \"$(System.CollectionUri)$(System.TeamProject)/_apis/git/repositories/$(Build.Repository.Name)/pullRequests/$(System.PullRequest.PullRequestId)/threads?api-version=7.1\""
       } > "$CURL_CONFIG"
 
-      printf '{"comments":[{"parentCommentId":0,"content":%s,"commentType":1}],"status":1}' "$REPORT_JSON" | \
+      BODY="{\"comments\":[{\"parentCommentId\":0,\"content\":$REPORT_JSON,\"commentType\":1}],\"status\":1}"
+      printf '%s' "$BODY" | \
       curl -sS -f --config "$CURL_CONFIG"
     displayName: "Post PR comment"
     condition: eq(variables.hasChanges, 'true')
