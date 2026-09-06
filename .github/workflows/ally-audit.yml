@@ -115,9 +115,10 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           ALLY_CHANGED_FILES: ${{ steps.diff.outputs.files }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
+          INPUT_COPILOT_MODEL: ${{ inputs.copilot-model }}
         run: |
-          if [ -n "${{ inputs.copilot-model }}" ]; then
-            export COPILOT_MODEL="${{ inputs.copilot-model }}"
+          if [ -n "$INPUT_COPILOT_MODEL" ]; then
+            export COPILOT_MODEL="$INPUT_COPILOT_MODEL"
           fi
           printf '%s\n' \
             "Load the agent at .github/agents/ally.md and run /ally diff ${BASE_REF}." \
