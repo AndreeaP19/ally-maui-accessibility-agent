@@ -1,0 +1,11 @@
+{
+  "localize": true,
+  "resxPath": "examples/sample-app/Resources/Localization/AppResources.resx",
+  "localizeNamespace": "strings",
+  "keyConvention": "Pascal_Underscore",
+  "defaultBaseBranch": "main",
+  "failOn": "critical",
+  "excludePaths": ["**/bin/**", "**/obj/**"],
+  "readOnlyPaths": [],
+  "suppressions": []
+}
