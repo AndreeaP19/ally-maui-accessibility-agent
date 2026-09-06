@@ -16,6 +16,13 @@
 #      always GitHub-side, so this is required regardless of CI host.
 #   4. Copy .github/agents/ally.md and .allyconfig.json from the
 #      ally-maui-accessibility-agent repo into this repo, at the same paths.
+#
+# Base branch resolution: this pipeline diffs against .allyconfig.json's
+# defaultBaseBranch when set, falling back to the PR's actual target branch
+# otherwise. If this repo's PRs ever target a branch other than
+# defaultBaseBranch (e.g. a release branch), the diff will still be taken
+# against defaultBaseBranch — update it, or unset it to always follow the
+# PR's real target.
 
 trigger: none
 
@@ -47,7 +54,23 @@ steps:
 
   - script: |
       set -e
-      TARGET_BRANCH_NAME="${TARGET_BRANCH#refs/heads/}"
+      CONFIG_BASE=""
+      if [ -f .allyconfig.json ]; then
+        CONFIG_BASE=$(python3 -c "import json; print(json.load(open('.allyconfig.json')).get('defaultBaseBranch',''))" 2>/dev/null || true)
+      fi
+      if [ -n "$CONFIG_BASE" ]; then
+        echo "Using defaultBaseBranch from .allyconfig.json: $CONFIG_BASE"
+        echo "##vso[task.setvariable variable=targetBranchName]$CONFIG_BASE"
+      else
+        echo "No defaultBaseBranch in .allyconfig.json — using this PR's actual target branch."
+        echo "##vso[task.setvariable variable=targetBranchName]${TARGET_BRANCH#refs/heads/}"
+      fi
+    displayName: "Resolve base branch"
+    env:
+      TARGET_BRANCH: $(System.PullRequest.TargetBranch)
+
+  - script: |
+      set -e
       git fetch origin "$TARGET_BRANCH_NAME" --depth=1
       TARGET_REF="origin/$TARGET_BRANCH_NAME"
       CHANGED=$(git diff --name-only --diff-filter=ACMR "$TARGET_REF...HEAD" -- "$XAML_GLOB")
@@ -57,12 +80,11 @@ steps:
       else
         echo "##vso[task.setvariable variable=hasChanges]true"
       fi
-      echo "##vso[task.setvariable variable=targetBranchName]$TARGET_BRANCH_NAME"
       echo "$CHANGED" > changed-files.txt
       cat changed-files.txt
     displayName: "Find changed XAML files"
     env:
-      TARGET_BRANCH: $(System.PullRequest.TargetBranch)
+      TARGET_BRANCH_NAME: $(targetBranchName)
       XAML_GLOB: $(xamlGlob)
 
   - script: |

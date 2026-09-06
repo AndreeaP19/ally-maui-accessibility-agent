@@ -1,5 +1,12 @@
 name: Ally Accessibility Audit
 
+# Base branch resolution: this workflow diffs against .allyconfig.json's
+# defaultBaseBranch when set, falling back to the calling PR's actual target
+# branch otherwise. If this repo's PRs ever target a branch other than
+# defaultBaseBranch (e.g. a release branch), the diff will still be taken
+# against defaultBaseBranch — update it, or unset it to always follow the
+# PR's real target.
+
 on:
   workflow_call:
     inputs:
@@ -31,14 +38,29 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve base branch
+        id: base
+        run: |
+          CONFIG_BASE=""
+          if [ -f .allyconfig.json ]; then
+            CONFIG_BASE=$(jq -r '.defaultBaseBranch // empty' .allyconfig.json 2>/dev/null || true)
+          fi
+          if [ -n "$CONFIG_BASE" ]; then
+            echo "Using defaultBaseBranch from .allyconfig.json: $CONFIG_BASE"
+            echo "base_ref=$CONFIG_BASE" >> "$GITHUB_OUTPUT"
+          else
+            echo "No defaultBaseBranch in .allyconfig.json — using this PR's actual target branch."
+            echo "base_ref=${{ github.event.pull_request.base.ref }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Find changed XAML files
         id: diff
         env:
           XAML_GLOB: ${{ inputs.xaml-glob }}
+          BASE_REF: ${{ steps.base.outputs.base_ref }}
         run: |
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          CHANGED=$(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" -- "$XAML_GLOB")
+          git fetch origin "$BASE_REF" --depth=1
+          CHANGED=$(git diff --name-only --diff-filter=ACMR "origin/$BASE_REF...HEAD" -- "$XAML_GLOB")
 
           if [ -z "$CHANGED" ]; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
@@ -67,7 +89,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.copilot-token || secrets.GITHUB_TOKEN }}
           ALLY_CHANGED_FILES: ${{ steps.diff.outputs.files }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_REF: ${{ steps.base.outputs.base_ref }}
         run: |
           printf '%s\n' \
             "Load the agent at .github/agents/ally.md and run /ally diff ${BASE_REF}." \
