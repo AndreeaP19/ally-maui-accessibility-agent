@@ -19,15 +19,12 @@
 #      copy — it's project-specific. Run /ally config in this repo (if it
 #      hasn't been already) to generate and commit one.
 #
-# Base branch resolution: diffs against .allyconfig.json's defaultBaseBranch
-# when set, falling back to the PR's actual target branch otherwise. Read
-# from the PR's target branch via `git show`, never the PR's own working
-# tree, so a PR can't point defaultBaseBranch at a ref that already contains
-# its own changes to make the diff disappear.
-#
-# If this repo's PRs sometimes target a branch other than defaultBaseBranch
-# (e.g. a release branch), the diff is still taken against defaultBaseBranch
-# — keep it in sync, or leave it unset to always follow the PR's real target.
+# Base branch: this pipeline always diffs against the PR's actual target
+# branch (System.PullRequest.TargetBranch) — not .allyconfig.json's
+# defaultBaseBranch, which only affects local/manual `/ally diff`
+# invocations that omit [base-branch]. Using the PR's real target keeps
+# the diff correct even for repos where PRs sometimes target a branch
+# other than main (e.g. a release branch).
 
 trigger: none
 
@@ -59,37 +56,10 @@ steps:
 
   - script: |
       set -e
-      TRUSTED_BRANCH_NAME="${TARGET_BRANCH#refs/heads/}"
+      TARGET_BRANCH_NAME="${TARGET_BRANCH#refs/heads/}"
       # No --depth: a shallow fetch here can't be undone by a later plain
       # re-fetch, and would break the merge-base diff below.
-      git fetch origin "$TRUSTED_BRANCH_NAME"
-      CONFIG_BASE=$(git show "origin/$TRUSTED_BRANCH_NAME:.allyconfig.json" 2>/dev/null | python3 -c "import json, sys; raw = sys.stdin.read(); d = json.loads(raw) if raw.strip() else {}; print((d or {}).get('defaultBaseBranch') or '')" 2>/dev/null || true)
-      if [ -n "$CONFIG_BASE" ]; then
-        CONFIG_BASE="${CONFIG_BASE#refs/heads/}"
-        CONFIG_BASE="${CONFIG_BASE#origin/}"
-        echo "Using defaultBaseBranch from .allyconfig.json: $CONFIG_BASE"
-        echo "##vso[task.setvariable variable=targetBranchName]$CONFIG_BASE"
-      else
-        TARGET_BRANCH="${TARGET_BRANCH#refs/heads/}"
-        TARGET_BRANCH="${TARGET_BRANCH#origin/}"
-        echo "No defaultBaseBranch in .allyconfig.json — using this PR's actual target branch."
-        echo "##vso[task.setvariable variable=targetBranchName]$TARGET_BRANCH"
-      fi
-    displayName: "Resolve base branch"
-    env:
-      TARGET_BRANCH: $(System.PullRequest.TargetBranch)
-
-  - script: |
-      set -e
-      TARGET_BRANCH_NAME="${TARGET_BRANCH_NAME#refs/heads/}"
-      TARGET_BRANCH_NAME="${TARGET_BRANCH_NAME#origin/}"
-      # No --depth: a shallow fetch here can't be undone by a later plain
-      # re-fetch, and would break the merge-base diff below. Skip entirely
-      # if the previous step already fetched this same ref (the common
-      # case, when .allyconfig.json has no override).
-      if ! git rev-parse --verify -q "origin/$TARGET_BRANCH_NAME" > /dev/null; then
-        git fetch origin "$TARGET_BRANCH_NAME"
-      fi
+      git fetch origin "$TARGET_BRANCH_NAME"
       TARGET_REF="origin/$TARGET_BRANCH_NAME"
       CHANGED=$(git diff --name-only --diff-filter=ACMR "$TARGET_REF...HEAD" -- "$XAML_GLOB")
 
@@ -98,17 +68,18 @@ steps:
       else
         echo "##vso[task.setvariable variable=hasChanges]true"
       fi
+      echo "##vso[task.setvariable variable=targetBranchName]$TARGET_BRANCH_NAME"
       echo "$CHANGED" > changed-files.txt
       cat changed-files.txt
     displayName: "Find changed XAML files"
     env:
-      TARGET_BRANCH_NAME: $(targetBranchName)
+      TARGET_BRANCH: $(System.PullRequest.TargetBranch)
       XAML_GLOB: $(xamlGlob)
 
   - script: |
       set -e
       {
-        echo "Load the agent at .github/agents/ally.md and run /ally diff $TARGET_REF_NAME."
+        echo "Load the agent at .github/agents/ally.md and run /ally diff $TARGET_BRANCH_NAME."
         echo "The files changed relative to that base branch are attached below —"
         echo "use exactly this list as the diff scope; do not run git yourself to"
         echo "recompute it. Restrict reported findings to changed hunks (±3 lines)"
@@ -130,7 +101,7 @@ steps:
     condition: eq(variables.hasChanges, 'true')
     env:
       GITHUB_TOKEN: $(COPILOT_GITHUB_TOKEN)
-      TARGET_REF_NAME: $(targetBranchName)
+      TARGET_BRANCH_NAME: $(targetBranchName)
 
   - script: |
       set -e

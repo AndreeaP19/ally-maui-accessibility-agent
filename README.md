@@ -75,7 +75,7 @@ The wizard asks **one question at a time** and detects your `.resx` resource fil
 
 ## Running Ally in CI
 
-Ally can run in CI as a read-only check: it invokes `/ally diff` against a base branch, which reports findings only for changed hunks in the files a PR actually touches — not a full-repo `/ally feedback` pass. Both CI examples resolve the base branch from `.allyconfig.json`'s `defaultBaseBranch` when it's set, falling back to the PR's actual target branch otherwise — so if this repo's PRs sometimes target a branch other than `defaultBaseBranch` (e.g. a release branch), keep `defaultBaseBranch` in sync or unset it. Findings are posted as a PR comment. `/ally apply` is deliberately left out of automation — the apply checkpoint's confirmation step is a safety feature, not a formality, and there's no one in CI to confirm it. Always run `/ally apply` manually, locally.
+Ally can run in CI as a read-only check: it invokes `/ally diff` against the pull request's actual target branch, which reports findings only for changed hunks in the files a PR actually touches — not a full-repo `/ally feedback` pass. Both CI examples always use the PR's real target branch (from the platform's own PR metadata), not `.allyconfig.json`'s `defaultBaseBranch` — that field only matters for a local/manual `/ally diff` with no `[base-branch]` argument, so it stays correct even for repos where PRs sometimes target something other than `main` (e.g. a release branch). Findings are posted as a PR comment. `/ally apply` is deliberately left out of automation — the apply checkpoint's confirmation step is a safety feature, not a formality, and there's no one in CI to confirm it. Always run `/ally apply` manually, locally.
 
 ### GitHub Actions
 
