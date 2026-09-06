@@ -61,11 +61,15 @@ steps:
         CONFIG_BASE=$(python3 -c "import json; print(json.load(open('.allyconfig.json')).get('defaultBaseBranch',''))" 2>/dev/null || true)
       fi
       if [ -n "$CONFIG_BASE" ]; then
+        CONFIG_BASE="${CONFIG_BASE#refs/heads/}"
+        CONFIG_BASE="${CONFIG_BASE#origin/}"
         echo "Using defaultBaseBranch from .allyconfig.json: $CONFIG_BASE"
         echo "##vso[task.setvariable variable=targetBranchName]$CONFIG_BASE"
       else
+        TARGET_BRANCH="${TARGET_BRANCH#refs/heads/}"
+        TARGET_BRANCH="${TARGET_BRANCH#origin/}"
         echo "No defaultBaseBranch in .allyconfig.json — using this PR's actual target branch."
-        echo "##vso[task.setvariable variable=targetBranchName]${TARGET_BRANCH#refs/heads/}"
+        echo "##vso[task.setvariable variable=targetBranchName]$TARGET_BRANCH"
       fi
     displayName: "Resolve base branch"
     env:
@@ -73,6 +77,8 @@ steps:
 
   - script: |
       set -e
+      TARGET_BRANCH_NAME="${TARGET_BRANCH_NAME#refs/heads/}"
+      TARGET_BRANCH_NAME="${TARGET_BRANCH_NAME#origin/}"
       git fetch origin "$TARGET_BRANCH_NAME" --depth=1
       TARGET_REF="origin/$TARGET_BRANCH_NAME"
       CHANGED=$(git diff --name-only --diff-filter=ACMR "$TARGET_REF...HEAD" -- "$XAML_GLOB")

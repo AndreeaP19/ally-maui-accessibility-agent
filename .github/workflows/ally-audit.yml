@@ -46,11 +46,16 @@ jobs:
             CONFIG_BASE=$(jq -r '.defaultBaseBranch // empty' .allyconfig.json 2>/dev/null || true)
           fi
           if [ -n "$CONFIG_BASE" ]; then
+            CONFIG_BASE="${CONFIG_BASE#refs/heads/}"
+            CONFIG_BASE="${CONFIG_BASE#origin/}"
             echo "Using defaultBaseBranch from .allyconfig.json: $CONFIG_BASE"
             echo "base_ref=$CONFIG_BASE" >> "$GITHUB_OUTPUT"
           else
+            PR_BASE_REF="${{ github.event.pull_request.base.ref }}"
+            PR_BASE_REF="${PR_BASE_REF#refs/heads/}"
+            PR_BASE_REF="${PR_BASE_REF#origin/}"
             echo "No defaultBaseBranch in .allyconfig.json — using this PR's actual target branch."
-            echo "base_ref=${{ github.event.pull_request.base.ref }}" >> "$GITHUB_OUTPUT"
+            echo "base_ref=$PR_BASE_REF" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Find changed XAML files
@@ -59,6 +64,8 @@ jobs:
           XAML_GLOB: ${{ inputs.xaml-glob }}
           BASE_REF: ${{ steps.base.outputs.base_ref }}
         run: |
+          BASE_REF="${BASE_REF#refs/heads/}"
+          BASE_REF="${BASE_REF#origin/}"
           git fetch origin "$BASE_REF" --depth=1
           CHANGED=$(git diff --name-only --diff-filter=ACMR "origin/$BASE_REF...HEAD" -- "$XAML_GLOB")
 
