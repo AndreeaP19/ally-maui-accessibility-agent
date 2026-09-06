@@ -78,7 +78,7 @@ jobs:
           ALLY_PROMPT_EOF
           echo "$ALLY_CHANGED_FILES" >> ally-prompt.txt
 
-          copilot -p "$(cat ally-prompt.txt)" --allow-all-tools > ally-report.md
+          copilot -p "$(cat ally-prompt.txt)" --allow-tool search/codebase > ally-report.md
 
       - name: Post PR comment
         if: steps.diff.outputs.has_changes == 'true'
