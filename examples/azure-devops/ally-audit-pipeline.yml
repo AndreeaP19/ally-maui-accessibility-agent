@@ -46,7 +46,7 @@ steps:
       set -e
       git fetch origin "$(System.PullRequest.TargetBranch)" --depth=1
       TARGET_REF="origin/$(echo $(System.PullRequest.TargetBranch) | sed 's#refs/heads/##')"
-      CHANGED=$(git diff --name-only --diff-filter=ACMR "$TARGET_REF...HEAD" -- '$(xamlGlob)')
+      CHANGED=$(git diff --name-only --diff-filter=ACMR "$TARGET_REF...HEAD" -- "$(xamlGlob)")
 
       if [ -z "$CHANGED" ]; then
         echo "##vso[task.setvariable variable=hasChanges]false"
@@ -62,14 +62,16 @@ steps:
       {
         echo "Load the agent at .github/agents/ally.md and run /ally feedback."
         echo "Restrict the audit to only the changed files listed below. Respect"
-        echo ".allyconfig.json if it exists at the repo root. Do not write or"
-        echo "modify any files. Output the full findings report as Markdown."
+        echo ".allyconfig.json only after confirming it exists at the repo root;"
+        echo "if it is missing, stop and report that the audit was skipped. Do"
+        echo "not write or modify any files. Output the full findings report as"
+        echo "Markdown."
         echo ""
         echo "Changed files:"
         cat changed-files.txt
       } > ally-prompt.txt
 
-      copilot -p "$(cat ally-prompt.txt)" --allow-all-tools > ally-report.md
+      copilot -p "$(cat ally-prompt.txt)" --allow-tool search/codebase > ally-report.md
       cat ally-report.md
     displayName: "Run Ally feedback"
     condition: eq(variables.hasChanges, 'true')

@@ -31,10 +31,12 @@ jobs:
 
       - name: Find changed XAML files
         id: diff
+        env:
+          XAML_GLOB: ${{ inputs.xaml-glob }}
         run: |
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          CHANGED=$(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" -- '${{ inputs.xaml-glob }}')
+          CHANGED=$(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" -- "$XAML_GLOB")
 
           if [ -z "$CHANGED" ]; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
@@ -67,8 +69,10 @@ jobs:
           cat > ally-prompt.txt <<'ALLY_PROMPT_EOF'
           Load the agent at .github/agents/ally.md and run /ally feedback.
           Restrict the audit to only the changed files listed below. Respect
-          .allyconfig.json if it exists at the repo root. Do not write or
-          modify any files. Output the full findings report as Markdown.
+          .allyconfig.json only after confirming it exists at the repo root;
+          if it is missing, stop and report that the audit was skipped. Do not
+          write or modify any files. Output the full findings report as
+          Markdown.
 
           Changed files:
           ALLY_PROMPT_EOF
@@ -98,4 +102,6 @@ jobs:
 
       - name: No XAML changes
         if: steps.diff.outputs.has_changes != 'true'
-        run: echo "No files matching '${{ inputs.xaml-glob }}' changed in this PR — skipping audit."
+        env:
+          XAML_GLOB: ${{ inputs.xaml-glob }}
+        run: echo "No files matching \"$XAML_GLOB\" changed in this PR — skipping audit."
