@@ -111,56 +111,78 @@ steps:
       TARGET_BRANCH_NAME: $(targetBranchName)
 
   - script: |
-      set -e
-      if [ -f ally-report.md ]; then
-        node - <<'NODE'
-        const fs = require('fs');
-        const path = require('path');
-        const report = fs.readFileSync('ally-report.md', 'utf8');
+      node - <<'NODE'
+      const fs = require('fs');
+       
+      if (!fs.existsSync('ally-report.md')) {
+        fs.writeFileSync('findings.json', JSON.stringify([], null, 2));
+        process.exit(0);
+      }
+
+      const report = fs.readFileSync('ally-report.md', 'utf8');
+      const severityIcons = { critical: '🔴', major: '🟠', minor: '🟡', info: '⚪' };
+      const findings = [];
+       
+      const lines = report.split(/\r?\n/);
+      let currentFinding = null;
+      let inFindingsSection = false;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
          
-        const severityIcons = { critical: '🔴', major: '🟠', minor: '🟡', info: '⚪' };
-        const findings = [];
-        const lines = report.split(/\r?\n/);
-        let currentFinding = null;
-
-        for (const line of lines) {
-          const severityMatch = line.match(/^(?:\d+\.|[-*])\s+\[([A-Za-z_]+)\]\s+(critical|major|minor|info)(?:\s+\|)?\s+(.*)/i);
-          if (severityMatch) {
-            if (currentFinding) findings.push(currentFinding);
-            currentFinding = {
-              ruleId: severityMatch[1],
-              severity: severityMatch[2].toLowerCase(),
-              message: severityMatch[3],
-              details: []
-            };
-          } else if (currentFinding && line.trim()) {
-            currentFinding.details.push(line);
-          } else if (!line.trim() && currentFinding) {
-            findings.push(currentFinding);
-            currentFinding = null;
-          }
+        if (line.includes('Findings by severity') || line.match(/^#+\s+Findings/i)) {
+          inFindingsSection = true;
+          continue;
         }
-        if (currentFinding) findings.push(currentFinding);
 
-        fs.writeFileSync('findings.json', JSON.stringify(findings, null, 2));
-        NODE
-      fi
+        if (!inFindingsSection) continue;
+
+        const match = line.match(/^\d+\.\s+\*?\*?\[([A-Z0-9_]+)\]\*?\*?\s+\|\s+(🔴|🟠|🟡|⚪)\s+(\w+)\s+\|\s+(.+)/);
+        if (match) {
+          if (currentFinding) findings.push(currentFinding);
+          const [, ruleId, icon, severity, message] = match;
+          currentFinding = {
+            ruleId,
+            severity: severity.toLowerCase(),
+            message,
+            details: []
+          };
+        } else if (currentFinding && line.trim() && !line.match(/^(#+|---|[0-9]+\.|Findings)/)) {
+          currentFinding.details.push(line.trim());
+        } else if (!line.trim() && currentFinding && i > 0 && !lines[i - 1].match(/^\d+\./)) {
+          findings.push(currentFinding);
+          currentFinding = null;
+        }
+      }
+      if (currentFinding) findings.push(currentFinding);
+
+      fs.writeFileSync('findings.json', JSON.stringify(findings, null, 2));
+      NODE
     displayName: "Parse findings into JSON"
     condition: eq(variables.hasChanges, 'true')
 
   - script: |
-      if [ ! -f findings.json ]; then
-        echo "No findings file created"
-        exit 0
-      fi
-
       node - <<'NODE'
       const fs = require('fs');
       const axios = require('axios');
 
+      if (!fs.existsSync('findings.json')) {
+        console.log('No findings file found');
+        process.exit(0);
+      }
+
       const findings = JSON.parse(fs.readFileSync('findings.json', 'utf8'));
       if (findings.length === 0) {
-        console.log('No findings to post');
+        const baseUrl = '$(System.CollectionUri)$(System.TeamProject)/_apis/git/repositories/$(Build.Repository.Name)/pullRequests/$(System.PullRequest.PullRequestId)';
+        const token = process.env.SYSTEM_ACCESSTOKEN;
+        const threadBody = {
+          comments: [{ parentCommentId: 0, content: '✅ No accessibility findings detected.', commentType: 1 }],
+          status: 1
+        };
+
+        axios.post(`${baseUrl}/threads?api-version=7.1`, threadBody, {
+          auth: { username: '', password: token }
+        }).catch(e => console.error('Failed to post:', e.message));
         process.exit(0);
       }
 
@@ -171,7 +193,8 @@ steps:
       (async () => {
         for (const finding of findings) {
           const icon = severityIcons[finding.severity] || '⚪';
-          const body = `${icon} **${finding.ruleId}** (${finding.severity})\n\n${finding.message}${finding.details.length > 0 ? '\n\n' + finding.details.join('\n') : ''}`;
+          const detailsText = finding.details.length > 0 ? '\n\n' + finding.details.join('\n') : '';
+          const body = `${icon} **${finding.ruleId}** (${finding.severity})\n\n${finding.message}${detailsText}`;
            
           const threadBody = {
             comments: [{ parentCommentId: 0, content: body, commentType: 1 }],
