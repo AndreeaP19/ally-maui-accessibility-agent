@@ -40,8 +40,22 @@ steps:
   displayName: 'Install Copilot CLI'
 
 - script: |
-    TARGET="$(System.PullRequest.TargetBranch)"
-    TARGET="${TARGET#refs/heads/}"
+    TARGET="${TARGET_BRANCH#refs/heads/}"
+
+    # A build queued by hand has no PR, so there is nothing to diff against: skip
+    # cleanly. Azure passes an undefined variable through as its literal macro text.
+    case "$TARGET" in
+      '' | '$('*)
+        echo "##[warning]Not a pull request build, so there is no target branch to diff against. Skipping the Ally audit."
+        echo "##vso[task.setvariable variable=xamlFiles]"
+        exit 0
+        ;;
+    esac
+
+    # In a PR build, any failure here (e.g. fetching a renamed or deleted target
+    # branch) must fail the step. Otherwise the file list comes out empty, every
+    # later step is skipped, and the check passes without auditing the PR.
+    set -eo pipefail
     git fetch origin "$TARGET"
     git diff --name-only --diff-filter=ACMR "origin/$TARGET...HEAD" -- '*.xaml' > ally-changed-files.txt
     git diff -U3 --diff-filter=ACMR "origin/$TARGET...HEAD" -- '*.xaml' > ally-diff.patch
@@ -50,6 +64,8 @@ steps:
     echo "##vso[task.setvariable variable=targetBranch]$TARGET"
     echo "##vso[task.setvariable variable=xamlFiles]$FILES"
   displayName: 'Find changed XAML files'
+  env:
+    TARGET_BRANCH: $(System.PullRequest.TargetBranch)
 
 - script: |
     {
@@ -83,9 +99,10 @@ steps:
         --allow-tool 'read' \
         --deny-tool 'write' \
         --no-ask-user \
-        -s > ally-report.md
+        -s > ally-report.md 2> ally-stderr.log
       CODE=$?
       cat ally-report.md
+      cat ally-stderr.log >&2
       if [ "$CODE" -eq 0 ] && grep -q 'FINDINGS_SUMMARY' ally-report.md; then break; fi
       echo "Attempt $attempt did not produce a findings report (exit $CODE)."
     done
@@ -104,6 +121,7 @@ steps:
     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
     ALLY_REPORT_PATH: ally-report.md
     ALLY_CHANGED_FILES_PATH: ally-changed-files.txt
+    ALLY_STDERR_PATH: ally-stderr.log
     ALLY_EXIT_CODE: $(allyExitCode)
 
 - script: |

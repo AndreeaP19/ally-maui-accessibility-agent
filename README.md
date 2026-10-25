@@ -165,10 +165,11 @@ The pipeline installs the latest `@github/copilot` on every run. For fully repro
 
 | Symptom | Cause and fix |
 |---|---|
-| "Run Ally" is skipped with *Condition was not met* | No `.xaml` file changed in the PR, or the run wasn't a PR build (a manual run has no target branch). Check the "Find changed XAML files" log. |
+| "Run Ally" is skipped with *Condition was not met* | No `.xaml` file changed in the PR, or the run wasn't a PR build. A manual run has no target branch, so "Find changed XAML files" logs *Not a pull request build* and skips the audit. |
+| "Find changed XAML files" fails, e.g. with `fatal: couldn't find remote ref` | The PR's target branch couldn't be fetched or diffed (renamed, deleted, or a network error). The step fails on purpose: an empty file list would otherwise skip the audit and pass the check without auditing the PR. Re-run, or retarget the PR. |
 | Posting fails with HTTP 403 and `TF401027: You need the Git 'PullRequestContribute' permission` | The build service can't comment on PRs. See setup step 5; the error names the identity. |
 | A *"Ally audit report could not be parsed"* comment | Ally answered without the report (for example, it asked a question instead). The step already retried once; re-run the build, and consider pinning the model. The comment is closed automatically once a later run parses. |
-| A *"Ally audit failed to run"* comment | The Copilot CLI exited with an error — usually a missing or invalid `COPILOT_GITHUB_PAT`, or a model your plan can't use. The comment includes the CLI output. |
+| A *"Ally audit failed to run"* comment | The Copilot CLI exited with an error — usually a missing or invalid `COPILOT_GITHUB_PAT`, or a model your plan can't use. The comment includes the CLI's output and its error output (stderr), which is kept out of the report itself so a warning on a successful run can't end up inside a finding. |
 | A re-run doesn't post anything new | Findings already on the PR are skipped on purpose. Delete Ally's old threads (resolving them isn't enough) to have them posted again. |
 | A fix shows as a code block, not a suggestion | Check the "Post Ally findings to PR" log: each finding says whether it became a suggestion and, if not, why. |
 

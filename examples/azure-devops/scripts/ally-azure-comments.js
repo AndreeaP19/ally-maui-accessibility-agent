@@ -8,7 +8,9 @@
 //
 // Inputs (environment): SYSTEM_ACCESSTOKEN, SYSTEM_COLLECTIONURI,
 // SYSTEM_TEAMPROJECT, BUILD_REPOSITORY_ID, SYSTEM_PULLREQUEST_PULLREQUESTID,
-// ALLY_REPORT_PATH, ALLY_CHANGED_FILES_PATH, ALLY_EXIT_CODE.
+// ALLY_REPORT_PATH, ALLY_CHANGED_FILES_PATH, ALLY_EXIT_CODE, ALLY_STDERR_PATH.
+// The CLI's stderr is kept out of the report so a warning on a successful run
+// can't end up inside a parsed finding; it's only shown in failure comments.
 // Set ALLY_DRY_RUN=1 to print what would be posted instead of calling Azure.
 //
 // Output: sets the pipeline variables allyShouldFail and allyFailingTiers.
@@ -303,6 +305,14 @@ async function main() {
   const failOn = readFailOn();
   const reportPath = env.ALLY_REPORT_PATH || 'ally-report.md';
   const report = fs.existsSync(reportPath) ? fs.readFileSync(reportPath, 'utf8') : '';
+  const stderrPath = env.ALLY_STDERR_PATH;
+  const stderr = stderrPath && fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, 'utf8').trim() : '';
+
+  // What the CLI printed, for the failure comments. Errors usually come last,
+  // so stderr keeps its tail.
+  const cliOutput = () =>
+    '**Output:**\n\n```\n' + (report.trim() || '(empty)').slice(0, 15000) + '\n```' +
+    (stderr ? '\n\n**Error output:**\n\n```\n' + stderr.slice(-5000) + '\n```' : '');
   const changedFiles = readLines(env.ALLY_CHANGED_FILES_PATH);
   const client = createClient();
   const seen = await client.existingMarkers();
@@ -324,8 +334,7 @@ async function main() {
   if (exitCode !== '0') {
     await postOnce(
       `ally-failed:${exitCode}`,
-      `## ⚠️ Ally audit failed to run\n\nThe Copilot CLI exited with code ${exitCode}.\n\n` +
-        '```\n' + report.slice(0, 20000) + '\n```',
+      `## ⚠️ Ally audit failed to run\n\nThe Copilot CLI exited with code ${exitCode}.\n\n` + cliOutput(),
       ACTIVE,
     );
     setVariable('allyShouldFail', 'true');
@@ -343,7 +352,7 @@ async function main() {
         "Ally's output didn't include the expected `FINDINGS_SUMMARY` marker (see the " +
         '"Findings Report Format" section of `.github/agents/ally.md`), so results can\'t be ' +
         'reliably posted or gated. Treating this as a failure rather than reporting "no findings."\n\n' +
-        '```\n' + report.slice(0, 20000) + '\n```',
+        cliOutput(),
       ACTIVE,
     );
     setVariable('allyShouldFail', 'true');
