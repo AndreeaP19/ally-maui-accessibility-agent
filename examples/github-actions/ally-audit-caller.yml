@@ -20,7 +20,7 @@ jobs:
       copilot-requests: write
     # Pin this reusable workflow to a tag or commit SHA in production repos;
     # @main can change without review.
-    uses: AndreeaP19/ally-maui-accessibility-agent/.github/workflows/ally-audit.yml@1d97e2dccd770298e1b85c5b55b02b1ed7ee12d0
+    uses: AndreeaP19/ally-maui-accessibility-agent/.github/workflows/ally-audit.yml@5b19fa6a4d10aaf8e10e61c8df11d3b7044b05a5
     with:
       # Optional: pin a specific model instead of your Copilot backend/org
       # policy's default, which can change over time. Uncomment and set to

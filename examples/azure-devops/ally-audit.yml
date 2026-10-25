@@ -3,7 +3,9 @@
 # Runs a read-only `/ally diff` audit on the XAML files a pull request changes,
 # posts the findings to the PR (a summary thread plus one inline thread per
 # finding, with a ```suggestion block when the fix is a safe drop-in), and
-# fails the build when findings reach `failOn` in .allyconfig.json.
+# fails the build when findings reach `failOn` in .allyconfig.json. Pushes that
+# change no XAML since the last audit skip Ally and reuse its result, and
+# "runOnPullRequests": false in .allyconfig.json turns the audit off.
 #
 # Setup — see "Running Ally in CI > Azure DevOps" in the README:
 #   1. Copy .github/agents/ally.md into your repo at the same path, and run
@@ -36,9 +38,6 @@ steps:
   inputs:
     versionSpec: '20.x'
 
-- script: npm install -g @github/copilot
-  displayName: 'Install Copilot CLI'
-
 - script: |
     TARGET="${TARGET_BRANCH#refs/heads/}"
 
@@ -56,6 +55,29 @@ steps:
     # branch) must fail the step. Otherwise the file list comes out empty, every
     # later step is skipped, and the check passes without auditing the PR.
     set -eo pipefail
+
+    # "runOnPullRequests": false in .allyconfig.json turns the audit off.
+    if ! RUN_ON_PRS=$(node -e '
+      const fs = require("fs");
+      let value;
+      try {
+        value = JSON.parse(fs.readFileSync(".allyconfig.json", "utf8").replace(/^\uFEFF/, "")).runOnPullRequests;
+      } catch (e) {
+        value = undefined; // a missing or broken config is reported by the later steps
+      }
+      if (value === undefined || value === true) process.stdout.write("true");
+      else if (value === false) process.stdout.write("false");
+      else process.exit(1);
+    '); then
+      echo "##[error]runOnPullRequests in .allyconfig.json must be true or false."
+      exit 1
+    fi
+    if [ "$RUN_ON_PRS" = "false" ]; then
+      echo "runOnPullRequests is false in .allyconfig.json. Skipping the Ally audit."
+      echo "##vso[task.setvariable variable=xamlFiles]"
+      exit 0
+    fi
+
     git fetch origin "$TARGET"
     git diff --name-only --diff-filter=ACMR "origin/$TARGET...HEAD" -- '*.xaml' > ally-changed-files.txt
     git diff -U3 --diff-filter=ACMR "origin/$TARGET...HEAD" -- '*.xaml' > ally-diff.patch
@@ -66,6 +88,19 @@ steps:
   displayName: 'Find changed XAML files'
   env:
     TARGET_BRANCH: $(System.PullRequest.TargetBranch)
+
+# Skips the audit when the commits pushed since the last one change no XAML,
+# re-applying that audit's result. Sets allyMode to "full" or "skip".
+- script: node scripts/ally-azure-comments.js --plan
+  displayName: 'Check for new XAML changes'
+  condition: and(succeeded(), ne(variables['xamlFiles'], ''))
+  env:
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+    ALLY_SOURCE_COMMIT: $(System.PullRequest.SourceCommitId)
+
+- script: npm install -g @github/copilot
+  displayName: 'Install Copilot CLI'
+  condition: and(succeeded(), ne(variables['xamlFiles'], ''), eq(variables['allyMode'], 'full'))
 
 - script: |
     {
@@ -109,16 +144,17 @@ steps:
     echo "##vso[task.setvariable variable=allyExitCode]$CODE"
     exit 0
   displayName: 'Run Ally'
-  condition: ne(variables['xamlFiles'], '')
+  condition: and(succeeded(), ne(variables['xamlFiles'], ''), eq(variables['allyMode'], 'full'))
   env:
     COPILOT_GITHUB_TOKEN: $(COPILOT_GITHUB_PAT)
     INPUT_COPILOT_MODEL: ${{ parameters.copilotModel }}
 
 - script: node scripts/ally-azure-comments.js
   displayName: 'Post Ally findings to PR'
-  condition: and(succeeded(), ne(variables['xamlFiles'], ''))
+  condition: and(succeeded(), ne(variables['xamlFiles'], ''), eq(variables['allyMode'], 'full'))
   env:
     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+    ALLY_SOURCE_COMMIT: $(System.PullRequest.SourceCommitId)
     ALLY_REPORT_PATH: ally-report.md
     ALLY_CHANGED_FILES_PATH: ally-changed-files.txt
     ALLY_STDERR_PATH: ally-stderr.log
