@@ -82,6 +82,30 @@ jobs:
             echo "::error::BASE_REF is empty — this workflow requires a pull_request event (github.event.pull_request.base.ref was not set). Check that the caller workflow's 'on:' trigger includes pull_request."
             exit 1
           fi
+
+          # "runOnPullRequests": false in .allyconfig.json turns the audit off.
+          if ! RUN_ON_PRS=$(node -e '
+            const fs = require("fs");
+            let value;
+            try {
+              value = JSON.parse(fs.readFileSync(".allyconfig.json", "utf8").replace(/^\uFEFF/, "")).runOnPullRequests;
+            } catch (e) {
+              value = undefined; // a missing or broken config is reported by the later steps
+            }
+            if (value === undefined || value === true) process.stdout.write("true");
+            else if (value === false) process.stdout.write("false");
+            else process.exit(1);
+          '); then
+            echo "::error::runOnPullRequests in .allyconfig.json must be true or false."
+            exit 1
+          fi
+          if [ "$RUN_ON_PRS" = "false" ]; then
+            echo "runOnPullRequests is false in .allyconfig.json. Skipping the Ally audit."
+            echo "disabled=true" >> "$GITHUB_OUTPUT"
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           # No --depth: a shallow fetch here can't be undone by a later
           # plain re-fetch, and would break the merge-base diff below.
           git fetch origin "$BASE_REF"
@@ -98,18 +122,72 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Set up Node.js
+      - name: Check for new XAML changes
+        # The summary comment records the PR commit each successful audit
+        # covered, and its result. When the commits pushed since then change
+        # no XAML, the audit is skipped and that result is applied again, so
+        # earlier findings still fail the check. A rebase or force-push that
+        # drops the audited commit falls back to a full audit.
         if: steps.diff.outputs.has_changes == 'true'
+        id: plan
+        uses: actions/github-script@v7
+        env:
+          XAML_GLOB: ${{ inputs.xaml-glob }}
+        with:
+          script: |
+            const { execFileSync } = require('child_process');
+            const git = (args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+            const gitSucceeds = (args) => { try { git(args); return true; } catch (e) { return false; } };
+            const { owner, repo } = context.repo;
+            const head = context.payload.pull_request.head.sha;
+            const full = (reason) => { core.info(`Full audit: ${reason}.`); core.setOutput('mode', 'full'); };
+
+            // Only trust comments this workflow wrote: anyone can paste a marker
+            // into a PR comment, and a forged state would skip the audit.
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: context.issue.number, per_page: 100,
+            });
+            const summary = comments
+              .filter((c) => c.user && c.user.login === 'github-actions[bot]' && (c.body || '').includes('<!-- ally-summary -->'))
+              .pop();
+            let state = null;
+            const m = summary && summary.body.match(/<!-- ally-state:([A-Za-z0-9+/=]+) -->/);
+            if (m) {
+              try { state = JSON.parse(Buffer.from(m[1], 'base64').toString('utf8')); } catch (e) { state = null; }
+              if (state && (!/^[0-9a-f]{40}$/i.test(state.sha) || typeof state.shouldFail !== 'boolean')) state = null;
+            }
+            if (!state) return full('there is no earlier audit on this PR');
+
+            const short = state.sha.slice(0, 7);
+            if (!gitSucceeds(['cat-file', '-e', `${state.sha}^{commit}`])) {
+              return full(`the last audited commit ${short} isn't in this checkout`);
+            }
+            if (!gitSucceeds(['merge-base', '--is-ancestor', state.sha, head])) {
+              return full(`the last audited commit ${short} is no longer in the PR's history (rebase or force-push)`);
+            }
+            const changed = git(['diff', '--name-only', state.sha, head, '--', process.env.XAML_GLOB]).trim();
+            if (changed) return full(`XAML changed since the last audit of ${short}: ${changed.split('\n').join(', ')}`);
+
+            core.info(
+              `Skipping the audit: no XAML changed since the last audit of ${short}. ` +
+              `Re-applying its result (${state.shouldFail ? `fails on ${state.failingTiers}` : 'passes'}).`
+            );
+            core.setOutput('mode', 'skip');
+            core.setOutput('should_fail', state.shouldFail ? 'true' : 'false');
+            core.setOutput('failing_tiers', state.shouldFail ? `${state.failingTiers}, carried over from the audit of ${short}` : '');
+
+      - name: Set up Node.js
+        if: steps.diff.outputs.has_changes == 'true' && steps.plan.outputs.mode == 'full'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       - name: Install GitHub Copilot CLI
-        if: steps.diff.outputs.has_changes == 'true'
+        if: steps.diff.outputs.has_changes == 'true' && steps.plan.outputs.mode == 'full'
         run: npm install -g @github/copilot@$COPILOT_CLI_VERSION
 
       - name: Run Ally diff audit
-        if: steps.diff.outputs.has_changes == 'true'
+        if: steps.diff.outputs.has_changes == 'true' && steps.plan.outputs.mode == 'full'
         id: ally
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -163,7 +241,7 @@ jobs:
         # comments and the severity gate below get their data, so they can
         # never disagree with each other the way scraping the same report
         # twice with two different heuristics used to.
-        if: steps.diff.outputs.has_changes == 'true'
+        if: steps.diff.outputs.has_changes == 'true' && steps.plan.outputs.mode == 'full'
         id: comments
         uses: actions/github-script@v7
         env:
@@ -221,6 +299,24 @@ jobs:
             const pull_number = issue_number;
             const commit_id = context.payload.pull_request.head.sha;
 
+            const failOn = (process.env.ALLY_FAIL_ON || 'critical').toLowerCase();
+            const failOnIdx = order.indexOf(failOn);
+            const failingTiers = order
+              .slice(0, failOnIdx === -1 ? order.length : failOnIdx + 1)
+              .filter((tier) => counts[tier] > 0);
+            const shouldFail = failingTiers.length > 0;
+
+            // Ally's earlier comments on this PR. Only this workflow's own
+            // comments count, so a pasted marker can't hide a finding.
+            const ownComments = (list) => list.filter((c) => c.user && c.user.login === 'github-actions[bot]');
+            const issueComments = ownComments(await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 }));
+            const reviewComments = ownComments(await github.paginate(github.rest.pulls.listReviewComments, { owner, repo, pull_number, per_page: 100 }));
+            const reviews = ownComments(await github.paginate(github.rest.pulls.listReviews, { owner, repo, pull_number, per_page: 100 }));
+            const posted = new Set();
+            for (const c of [...issueComments, ...reviewComments, ...reviews]) {
+              for (const mk of (c.body || '').matchAll(/<!-- (ally-finding:[^ ]+) -->/g)) posted.add(mk[1]);
+            }
+
             // Classify each finding block as inline (has a usable File row,
             // so it can anchor to that file/line) or unanchored (goes in the
             // review body as plain text instead).
@@ -257,26 +353,48 @@ jobs:
 
               // Findings without a usable File row can't be anchored inline —
               // fold those into the review's top-level summary instead.
+              // Each finding carries a hidden marker, so re-runs on the same
+              // PR don't repeat findings that are already there.
               const fileMatch = (fields.File || '').match(/^(.+?):(\d+)(?:-\d+)?\s*$/);
+              const marker = `ally-finding:${ruleId}:${fileMatch ? `${fileMatch[1]}:${fileMatch[2]}` : (fields.File || 'unknown')}`.replace(/\s+/g, '_');
+              if (posted.has(marker)) {
+                core.info(`Skipping ${marker}: already posted on this PR.`);
+                continue;
+              }
               if (fileMatch) {
                 const [, path, line] = fileMatch;
-                inlineComments.push({ ruleId, path, line: parseInt(line, 10), side: 'RIGHT', body });
+                inlineComments.push({ ruleId, path, line: parseInt(line, 10), side: 'RIGHT', body: `${body}\n\n<!-- ${marker} -->` });
               } else {
                 const fileLine = fields.File ? [`**File:** ${fields.File}`, ''] : [];
-                unanchored.push([header, '', ...fileLine, ...detailLines].join('\n'));
+                unanchored.push([header, '', ...fileLine, ...detailLines, '', `<!-- ${marker} -->`].join('\n'));
               }
             }
 
             // The summary comment is just this — nothing else. Everything
             // else (inline findings, and any that couldn't be anchored to a
             // line) belongs to the review below, not this comment.
-            const summaryBody = total === 0
-              ? '## 🔍 Ally Accessibility Audit\n\n✅ No accessibility findings detected.'
-              : `## 🔍 Ally Accessibility Audit\n\nFindings by severity: ${summaryLine}`;
+            // One summary comment per PR, updated in place. It also records
+            // which PR commit this audit covered, so "Check for new XAML
+            // changes" can skip later pushes that don't touch XAML.
+            const state = Buffer.from(JSON.stringify({
+              sha: commit_id, shouldFail, failingTiers: failingTiers.join(', '), counts,
+            })).toString('base64');
+            const summaryBody = [
+              total === 0
+                ? '## 🔍 Ally Accessibility Audit\n\n✅ No accessibility findings detected.'
+                : `## 🔍 Ally Accessibility Audit\n\nFindings by severity: ${summaryLine}`,
+              `Audited commit \`${commit_id.slice(0, 7)}\`. Later pushes that change no XAML reuse this result.`,
+              '<!-- ally-summary -->',
+              `<!-- ally-state:${state} -->`,
+            ].join('\n\n');
+            const existingSummary = issueComments.filter((c) => (c.body || '').includes('<!-- ally-summary -->')).pop();
+            if (existingSummary) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existingSummary.id, body: summaryBody });
+            } else {
+              await postComment(summaryBody);
+            }
 
-            await postComment(summaryBody);
-
-            if (total > 0) {
+            if (inlineComments.length > 0 || unanchored.length > 0) {
               const unanchoredText = unanchored.length > 0
                 ? `**Findings that couldn't be anchored to a specific line:**\n\n${unanchored.join('\n\n---\n\n')}`
                 : '';
@@ -322,13 +440,7 @@ jobs:
               }
             }
 
-            const failOn = (process.env.ALLY_FAIL_ON || 'critical').toLowerCase();
-            const failOnIdx = order.indexOf(failOn);
-            const failingTiers = order
-              .slice(0, failOnIdx === -1 ? order.length : failOnIdx + 1)
-              .filter((tier) => counts[tier] > 0);
-
-            core.setOutput('should_fail', failingTiers.length > 0 ? 'true' : 'false');
+            core.setOutput('should_fail', shouldFail ? 'true' : 'false');
             core.setOutput('failing_tiers', failingTiers.join(', '));
 
       - name: Fail if Ally errored
@@ -340,9 +452,13 @@ jobs:
           exit 1
 
       - name: Fail on configured severity gate
-        if: steps.diff.outputs.has_changes == 'true' && steps.ally.outputs.exit_code == '0' && steps.comments.outputs.should_fail == 'true'
+        if: >-
+          steps.diff.outputs.has_changes == 'true' && (
+            (steps.plan.outputs.mode == 'full' && steps.ally.outputs.exit_code == '0' && steps.comments.outputs.should_fail == 'true') ||
+            (steps.plan.outputs.mode == 'skip' && steps.plan.outputs.should_fail == 'true')
+          )
         env:
-          FAILING_TIERS: ${{ steps.comments.outputs.failing_tiers }}
+          FAILING_TIERS: ${{ steps.plan.outputs.mode == 'skip' && steps.plan.outputs.failing_tiers || steps.comments.outputs.failing_tiers }}
         run: |
           if [ -n "$FAILING_TIERS" ]; then
             echo "::error::Accessibility findings at or above the configured failOn threshold ($FAILING_TIERS) — PR cannot be merged."
@@ -352,7 +468,7 @@ jobs:
           exit 1
 
       - name: No XAML changes
-        if: steps.fork-check.outputs.is_fork != 'true' && steps.diff.outputs.has_changes != 'true'
+        if: steps.fork-check.outputs.is_fork != 'true' && steps.diff.outputs.has_changes != 'true' && steps.diff.outputs.disabled != 'true'
         env:
           XAML_GLOB: ${{ inputs.xaml-glob }}
         run: echo "No files matching \"$XAML_GLOB\" changed in this PR — skipping audit."

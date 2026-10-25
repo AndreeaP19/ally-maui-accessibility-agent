@@ -14,8 +14,17 @@
 // Set ALLY_DRY_RUN=1 to print what would be posted instead of calling Azure.
 //
 // Output: sets the pipeline variables allyShouldFail and allyFailingTiers.
+//
+// With --plan, it instead decides whether this PR update needs a new audit at
+// all, and sets allyMode to "full" or "skip". The summary thread records the
+// PR commit (ALLY_SOURCE_COMMIT) each successful audit covered, and its
+// result. When the commits pushed since then change no XAML, the audit is
+// skipped and the recorded result is applied again, so earlier findings still
+// fail the build. A rebase or force-push that drops the audited commit falls
+// back to a full audit.
 
 const fs = require('fs');
+const { execFileSync } = require('child_process');
 
 const env = process.env;
 const DRY_RUN = env.ALLY_DRY_RUN === '1';
@@ -29,6 +38,37 @@ const CLOSED = 4;
 
 function setVariable(name, value) {
   console.log(`##vso[task.setvariable variable=${name}]${value}`);
+}
+
+function git(args) {
+  return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+function gitSucceeds(args) {
+  try {
+    git(args);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// The audit state lives in a hidden marker on the summary comment, base64 so
+// the JSON can never close the HTML comment early.
+function encodeState(state) {
+  return Buffer.from(JSON.stringify(state)).toString('base64');
+}
+
+function decodeState(content) {
+  const m = (content || '').match(/<!-- ally-state:([A-Za-z0-9+/=]+) -->/);
+  if (!m) return null;
+  try {
+    const state = JSON.parse(Buffer.from(m[1], 'base64').toString('utf8'));
+    if (!/^[0-9a-f]{40}$/i.test(state.sha) || typeof state.shouldFail !== 'boolean') return null;
+    return state;
+  } catch (e) {
+    return null;
+  }
 }
 
 function readFailOn() {
@@ -256,18 +296,34 @@ function createClient() {
   }
 
   return {
-    // marker -> [{ id, active }] for every Ally comment already on the PR
-    async existingMarkers() {
+    // The identity behind SYSTEM_ACCESSTOKEN (the build service), or null.
+    async selfId() {
+      try {
+        const data = await call('GET', `${env.SYSTEM_COLLECTIONURI}_apis/connectionData`);
+        return (data.authenticatedUser && data.authenticatedUser.id) || null;
+      } catch (e) {
+        console.log(`##[warning]Could not identify the build service (${e.message}).`);
+        return null;
+      }
+    },
+    // marker -> [{ id, active, commentId, content }] for every Ally comment
+    // already on the PR. Only comments the build service wrote count: anyone
+    // can paste a marker into a PR comment, and a forged audit state would
+    // otherwise let them skip the audit and pass the check.
+    async existingMarkers({ trustedOnly = false } = {}) {
       const markers = new Map();
       if (DRY_RUN) return markers;
+      const self = await this.selfId();
+      if (!self && trustedOnly) return markers;
       const data = await call('GET', `${threadsBase}?api-version=7.1`);
       for (const thread of data.value || []) {
         if (thread.isDeleted) continue;
         const active = thread.status === 'active' || thread.status === 1;
         for (const comment of thread.comments || []) {
+          if (self && !(comment.author && comment.author.id === self)) continue;
           for (const m of (comment.content || '').matchAll(/<!-- (ally-[^ ]+) -->/g)) {
             if (!markers.has(m[1])) markers.set(m[1], []);
-            markers.get(m[1]).push({ id: thread.id, active });
+            markers.get(m[1]).push({ id: thread.id, active, commentId: comment.id, content: comment.content });
           }
         }
       }
@@ -290,6 +346,13 @@ function createClient() {
         return;
       }
       await call('POST', `${threadsBase}?api-version=7.1`, body);
+    },
+    async updateComment(threadId, commentId, content) {
+      if (DRY_RUN) {
+        console.log(`--- DRY RUN update thread ${threadId} comment ${commentId}\n${content}\n`);
+        return;
+      }
+      await call('PATCH', `${threadsBase}/${threadId}/comments/${commentId}?api-version=7.1`, { content });
     },
     async closeThread(id) {
       if (DRY_RUN) {
@@ -379,13 +442,29 @@ async function main() {
   const total = ORDER.reduce((sum, tier) => sum + counts[tier], 0);
   const summaryLine = ORDER.map((t) => `${ICONS[t]} ${t[0].toUpperCase() + t.slice(1)}: ${counts[t]}`).join('   ');
 
-  await postOnce(
-    `ally-summary:${ORDER.map((t) => counts[t]).join('-')}`,
+  const failIdx = ORDER.indexOf(failOn);
+  const failingTiers = ORDER.slice(0, failIdx + 1).filter((tier) => counts[tier] > 0);
+  const shouldFail = failingTiers.length > 0;
+
+  // One summary thread per PR, updated in place. It also records which PR
+  // commit this audit covered, so --plan can skip later pushes that don't
+  // touch XAML.
+  const sha = env.ALLY_SOURCE_COMMIT;
+  const audited = /^[0-9a-f]{40}$/i.test(sha || '');
+  const summaryContent = [
     total === 0
       ? '## 🔍 Ally Accessibility Audit\n\n✅ No accessibility findings detected.'
       : `## 🔍 Ally Accessibility Audit\n\nFindings by severity: ${summaryLine}`,
-    CLOSED,
-  );
+    ...(audited ? [`Audited commit \`${sha.slice(0, 7)}\`. Later pushes that change no XAML reuse this result.`] : []),
+    '<!-- ally-summary -->',
+    ...(audited ? [`<!-- ally-state:${encodeState({ sha, shouldFail, failingTiers: failingTiers.join(', '), counts })} -->`] : []),
+  ].join('\n\n');
+  const existingSummary = (seen.get('ally-summary') || []).sort((a, b) => b.id - a.id)[0];
+  if (existingSummary) {
+    await client.updateComment(existingSummary.id, existingSummary.commentId, summaryContent);
+  } else {
+    await client.postThread(summaryContent, CLOSED, null);
+  }
 
   for (const f of parseFindings(report, changedFiles)) {
     // A suggestion has its own marker, so a plain comment from an earlier run
@@ -444,13 +523,47 @@ async function main() {
     }
   }
 
-  const failIdx = ORDER.indexOf(failOn);
-  const failingTiers = ORDER.slice(0, failIdx + 1).filter((tier) => counts[tier] > 0);
-  setVariable('allyShouldFail', failingTiers.length > 0 ? 'true' : 'false');
+  setVariable('allyShouldFail', shouldFail ? 'true' : 'false');
   setVariable('allyFailingTiers', failingTiers.join(', '));
 }
 
-main().catch((err) => {
+// Decides whether this PR update needs a new audit (see the top of the file).
+async function plan() {
+  const head = env.ALLY_SOURCE_COMMIT || '';
+  const pathspec = env.ALLY_XAML_PATHSPEC || '*.xaml';
+  const full = (reason) => {
+    console.log(`Full audit: ${reason}.`);
+    setVariable('allyMode', 'full');
+  };
+
+  if (!/^[0-9a-f]{40}$/i.test(head)) return full('the PR source commit is unknown');
+  const seen = await createClient().existingMarkers({ trustedOnly: true });
+  const summaries = (seen.get('ally-summary') || []).sort((a, b) => b.id - a.id);
+  const state = summaries.length ? decodeState(summaries[0].content) : null;
+  if (!state) return full('there is no earlier audit on this PR');
+
+  const short = state.sha.slice(0, 7);
+  if (!gitSucceeds(['cat-file', '-e', `${state.sha}^{commit}`])) {
+    return full(`the last audited commit ${short} isn't in this checkout`);
+  }
+  if (!gitSucceeds(['merge-base', '--is-ancestor', state.sha, head])) {
+    return full(`the last audited commit ${short} is no longer in the PR's history (rebase or force-push)`);
+  }
+  const changed = git(['diff', '--name-only', state.sha, head, '--', pathspec]).trim();
+  if (changed) {
+    return full(`XAML changed since the last audit of ${short}: ${changed.split('\n').join(', ')}`);
+  }
+
+  console.log(
+    `Skipping the audit: no XAML changed since the last audit of ${short}. ` +
+      `Re-applying its result (${state.shouldFail ? `fails on ${state.failingTiers}` : 'passes'}).`,
+  );
+  setVariable('allyMode', 'skip');
+  setVariable('allyShouldFail', state.shouldFail ? 'true' : 'false');
+  setVariable('allyFailingTiers', state.shouldFail ? `${state.failingTiers}, carried over from the audit of ${short}` : '');
+}
+
+(process.argv.includes('--plan') ? plan() : main()).catch((err) => {
   console.log(`##[error]${err.message}`);
   process.exit(1);
 });

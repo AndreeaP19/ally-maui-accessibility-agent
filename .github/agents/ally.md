@@ -964,6 +964,7 @@ field's meaning is ambiguous, ask rather than guessing or dropping it.
   "defaultBaseBranch": "main",
 
   "failOn": "critical",
+  "runOnPullRequests": true,
 
   "mauiAccessibilitySkill": {
     "enabled": true,
@@ -999,6 +1000,10 @@ field's meaning is ambiguous, ask rather than guessing or dropping it.
   "readOnlyPaths": ["**/ThirdParty/**"]
 }
 ```
+
+`failOn` and `runOnPullRequests` are read by the CI integrations, not by
+Ally itself: `runOnPullRequests: false` turns the pull request audit off,
+and has no effect on any `/ally` command.
 
 ---
 

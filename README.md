@@ -132,6 +132,7 @@ The wizard creates this file for you. A typical configuration looks like:
 | `orderDetection` | boolean | Opt-in, off by default. Set to `true` to enable heuristic detection of reading-order mismatches (`MAUI_A11Y_003_READING_ORDER`): `Grid.Row`/`Grid.Column` visual order differing from declaration order, a describing `Label` declared after its control, or absolute/translation-based visual reordering. Left unset or `false`, Ally never fires that rule, even if one of those patterns is present. |
 | `defaultBaseBranch` | string | Base branch `/ally diff` uses when `[base-branch]` is omitted (e.g. `"main"`). CI ignores it and always uses the PR's real target branch. |
 | `failOn` | string | Minimum severity that fails a CI gate: `"critical"`, `"major"`, `"minor"`, or `"info"`. |
+| `runOnPullRequests` | boolean | Optional, defaults to `true`. Set to `false` to turn off the CI audit on pull requests (see [Running Ally in CI](#running-ally-in-ci)); the check then passes without running Ally. Any value other than `true` or `false` fails the check. It has no effect on the `/ally` commands. |
 | `mauiAccessibilitySkill` | object | Optional integration with a `maui-accessibility` skill: `enabled`, `skillName`, `required`, `fallbackOnMissing`, `fallbackOnError`. |
 | `rules` | object | Per-rule `enabled`/`severity` overrides, keyed by rule ID. |
 | `excludePaths` | string[] | Paths to skip entirely during scanning. |
@@ -265,17 +266,22 @@ In CI, Ally runs as a read-only check on each pull request:
 - **It audits only what the PR changed.** It runs `/ally diff` and reports findings only for changed hunks (±3 lines) in the XAML files the PR touches — not a full-repo `/ally feedback` pass.
 - **It diffs against the PR's real target branch**, taken from the platform's PR metadata, not `defaultBaseBranch` from `.allyconfig.json`. So it stays correct when a PR targets something other than `main`, such as a release branch.
 - **It never applies fixes.** `/ally apply` is left out of automation on purpose: its confirmation step is a safety feature, and there's no one in CI to confirm it. Run `/ally apply` locally.
+- **It only re-runs when XAML changes.** After each audit, the summary comment records which PR commit was audited, and its result. When a later push changes no XAML (for example, only C#), Ally isn't run again and that result is applied to the new commit, so earlier findings still fail the check. A rebase or force-push that removes the audited commit triggers a full audit.
 
-Each finding is posted as an inline comment on its file and line, alongside a summary comment with the severity counts. Two CI hosts are supported:
+Each finding is posted as an inline comment on its file and line, and a re-run never posts the same finding twice. A single summary comment with the severity counts is updated in place on every audit. Two CI hosts are supported:
 
-- **[GitHub Actions](#github-actions)** — a reusable workflow you call from your repo. Findings are posted as a single PR review.
+- **[GitHub Actions](#github-actions)** — a reusable workflow you call from your repo. Each audit's new findings are posted as a single PR review.
 - **[Azure DevOps](#azure-devops)** — a pipeline and a small Node script you copy into your repo. Azure DevOps has no review object, so each finding is its own PR thread.
 
 ### Why the check fails even though the findings are posted as comments
 
 This is intentional, on both hosts. The comments give *visibility*: what's wrong, exactly where, and how to fix it. The failing check *enforces* the gate, because a comment alone doesn't stop a PR from being merged — only a required status check does. Without it, `failOn` would be purely decorative.
 
-So a finding at or above `failOn` fails the check even though the same finding is already visible as a comment. To change what's enforced, set `failOn` in `.allyconfig.json` — for example `"major"` to also block on major findings, or `"info"` to fail on any finding. No workflow change is needed, since the gate reads the value at run time.
+So a finding at or above `failOn` fails the check even though the same finding is already visible as a comment. To change what's enforced, set `failOn` in `.allyconfig.json` — for example `"major"` to also block on major findings, or `"info"` to fail on any finding. No workflow change is needed, since the gate reads the value at run time. A push that changes no XAML reuses the last audit's result, so it fails (or passes) the check exactly as that audit did.
+
+### Turning the CI audit off
+
+Set `"runOnPullRequests": false` in `.allyconfig.json` and commit it. Both integrations then skip the audit and pass the check, logging *runOnPullRequests is false in .allyconfig.json*. Set it back to `true` (or remove it) to turn the audit on again. Because it's part of the PR's own files, a PR can't turn it off without that change showing up in the diff for review.
 
 ### GitHub Actions
 
@@ -352,15 +358,16 @@ The pipeline also installs the latest `@github/copilot` on every run. For fully 
 
 #### What the pipeline does
 
-1. **Find changed XAML files** — diffs the PR against its target branch (`System.PullRequest.TargetBranch`), writing the changed `.xaml` files to `ally-changed-files.txt` and their unified diff to `ally-diff.patch`. If nothing matches, the remaining steps are skipped.
-2. **Run Ally** — runs `/ally diff` through the Copilot CLI with read-only tools (`--allow-tool read --deny-tool write --no-ask-user`). The prompt hands Ally those two files as its scope, so it never needs to run git. If the output has no `FINDINGS_SUMMARY` marker, it retries once.
-3. **Post Ally findings to PR** — `ally-azure-comments.js` parses the [Findings Report Format](.github/agents/ally.md) and posts:
-   - a summary thread with the severity counts, posted as closed so it never blocks a merge;
+1. **Find changed XAML files** — checks `runOnPullRequests`, then diffs the PR against its target branch (`System.PullRequest.TargetBranch`), writing the changed `.xaml` files to `ally-changed-files.txt` and their unified diff to `ally-diff.patch`. If nothing matches, the remaining steps are skipped.
+2. **Check for new XAML changes** — reads the summary thread's record of the last audited commit. If the commits pushed since then change no XAML, it skips the next three steps and re-applies that audit's result. Otherwise it asks for a full audit. The log says which, and why.
+3. **Install Copilot CLI** and **Run Ally** — runs `/ally diff` through the Copilot CLI with read-only tools (`--allow-tool read --deny-tool write --no-ask-user`). The prompt hands Ally those two files as its scope, so it never needs to run git. If the output has no `FINDINGS_SUMMARY` marker, it retries once.
+4. **Post Ally findings to PR** — `ally-azure-comments.js` parses the [Findings Report Format](.github/agents/ally.md) and posts:
+   - one summary thread with the severity counts and the audited commit, updated in place on each audit and posted as closed, so it never blocks a merge;
    - one active thread per finding, anchored inline to its file and line;
    - each fix as a `` ```suggestion `` block spanning the element's lines when it's a safe drop-in replacement (see below), otherwise as a normal code block.
 
-   Every thread carries a hidden marker, so re-running the build on the same PR doesn't repeat findings that are already there.
-4. **Fail on Ally findings** — fails the build when any finding is at or above `failOn`. The build also fails, with an explanatory PR comment, when Ally errors or its output can't be parsed; that's never reported as "no findings".
+   Every thread carries a hidden marker, so re-running the build on the same PR doesn't repeat findings that are already there. Only threads written by the build service are trusted: a marker pasted into someone else's comment is ignored, so it can't hide a finding or fake a passing result.
+5. **Fail on Ally findings** — fails the build when any finding is at or above `failOn`, including a result carried over from an earlier audit. The build also fails, with an explanatory PR comment, when Ally errors or its output can't be parsed; that's never reported as "no findings".
 
 **When a fix becomes a suggestion.** Ally's reported line numbers are approximate, and it quotes multi-line elements on one line. So the script only uses a suggestion when it can prove which element the fix replaces:
 
@@ -378,7 +385,8 @@ Fixes that replace a control with a different one, or with several elements (e.g
 | Posting fails with HTTP 403 and `TF401027: You need the Git 'PullRequestContribute' permission` | The build service can't comment on PRs. See setup step 5; the error names the identity. |
 | A *"Ally audit report could not be parsed"* comment | Ally answered without the report (for example, it asked a question instead). The step already retried once; re-run the build, and consider pinning the model. The comment is closed automatically once a later run parses. |
 | A *"Ally audit failed to run"* comment | The Copilot CLI exited with an error, usually because `COPILOT_GITHUB_PAT` is missing or invalid, or the model isn't available on your plan. The comment includes the CLI's output and its error output (stderr). Stderr is kept out of the report itself, so a warning on a successful run can't end up inside a finding. |
-| A re-run doesn't post anything new | Findings already on the PR are skipped on purpose. Delete Ally's old threads (resolving them isn't enough) to have them posted again. |
+| "Run Ally" is skipped, and "Check for new XAML changes" logs *Skipping the audit: no XAML changed since the last audit* | Working as intended: the push changed no XAML, so the last audit's result was re-applied without a new Copilot request. |
+| A re-run doesn't post anything new | Findings already on the PR are skipped on purpose, and a re-run of a commit whose XAML was already audited reuses that result. To force a full audit with fresh comments, delete Ally's threads, **including the summary** (resolving them isn't enough), then re-run. |
 | A fix shows as a code block, not a suggestion | Check the "Post Ally findings to PR" log: each finding says whether it became a suggestion and, if not, why. |
 
 ---
