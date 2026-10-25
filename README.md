@@ -77,11 +77,14 @@ The wizard asks **one question at a time** and detects your `.resx` resource fil
 
 Ally can run in CI as a read-only check: it invokes `/ally diff` against the pull request's actual target branch, reporting findings only for changed hunks in the files a PR actually touches — not a full-repo `/ally feedback` pass. It always uses the PR's real target branch (from the platform's own PR metadata), not `.allyconfig.json`'s `defaultBaseBranch` — that field only matters for a local/manual `/ally diff` with no `[base-branch]` argument, so it stays correct even for repos where PRs sometimes target something other than `main` (e.g. a release branch). `/ally apply` is deliberately left out of automation — the apply checkpoint's confirmation step is a safety feature, not a formality, and there's no one in CI to confirm it. Always run `/ally apply` manually, locally.
 
-Findings are posted as a single PR review with one inline comment per finding, anchored to the exact file and line, plus a separate standalone summary comment with the severity counts — not a flat comment dump.
+Findings are posted as one inline comment per finding, anchored to the exact file and line, plus a separate standalone summary comment with the severity counts — not a flat comment dump.
 
-> Only GitHub Actions is currently supported. Azure DevOps support isn't currently maintained.
+Two CI hosts are supported:
 
-### Setup
+- **GitHub Actions** — a reusable workflow you call from your repo. Findings are posted as a single PR review. See [GitHub Actions setup](#github-actions-setup).
+- **Azure DevOps Pipelines** — a pipeline and a small Node script you copy into your repo. Azure DevOps has no review object, so each finding is its own PR thread. See [Azure DevOps](#azure-devops).
+
+### GitHub Actions setup
 
 1. Copy `.github/agents/ally.md` into the target repository, at the same path (`.github/agents/ally.md`). `.allyconfig.json` isn't something to copy from this template — it's project-specific. In the target repository, run `/ally config` (if it hasn't been already) to generate and commit one.
 2. Add a caller workflow that invokes the reusable workflow in this repo — see [`examples/github-actions/ally-audit-caller.yml`](examples/github-actions/ally-audit-caller.yml).
@@ -94,11 +97,11 @@ Findings are posted as a single PR review with one inline comment per finding, a
    ```
    A reusable workflow can never be granted more than its caller allows, and a repo's default token permissions (Settings → Actions → General → Workflow permissions) are often read-only — without this, the job fails workflow validation before it even starts.
 
-### Authentication
+### GitHub Actions authentication
 
 `copilot-requests: write` above is all the auth this needs — it lets the Copilot CLI authenticate with the job's own automatic `GITHUB_TOKEN`, no secret or PAT required. This only fails to work if your organization's Copilot policy blocks CLI usage outright, which is a Copilot administration setting to fix, not something to work around in the workflow.
 
-### Pinning the model (recommended)
+### Pinning the model on GitHub Actions (recommended)
 
 By default, `copilot` uses whatever model your Copilot backend/org policy currently defaults to — which can change between CI runs as that policy changes, silently shifting what Ally finds. To pin a specific model instead, pass the reusable workflow's `copilot-model` input:
 
@@ -110,13 +113,72 @@ with:
 
 This sets the CLI's `COPILOT_MODEL` environment variable for the audit step only. Leave it unset to keep following your org's default. Model availability depends on your Copilot plan — check what's available before pinning one.
 
+### Azure DevOps
+
+The pipeline lives in [`examples/azure-devops/`](examples/azure-devops/). Unlike the GitHub integration it isn't a reusable template: you copy two files into your repo.
+
+| File | Copy to |
+|---|---|
+| [`examples/azure-devops/ally-audit.yml`](examples/azure-devops/ally-audit.yml) | anywhere in your repo, e.g. the root |
+| [`examples/azure-devops/scripts/ally-azure-comments.js`](examples/azure-devops/scripts/ally-azure-comments.js) | `scripts/ally-azure-comments.js` — the "Post Ally findings to PR" step runs it from there; change that path in the pipeline if you put it elsewhere |
+
+#### What it does
+
+1. **Find changed XAML files** — diffs the PR against its target branch (`System.PullRequest.TargetBranch`) and writes the changed `.xaml` files to `ally-changed-files.txt` and their unified diff to `ally-diff.patch`. If nothing matches, the remaining steps are skipped.
+2. **Run Ally** — runs `/ally diff` through the Copilot CLI with read-only tools (`--allow-tool read --deny-tool write --no-ask-user`). The prompt hands Ally those two files as its scope, so it never needs to run git. If the output has no `FINDINGS_SUMMARY` marker, it retries once.
+3. **Post Ally findings to PR** — `ally-azure-comments.js` parses the [Findings Report Format](.github/agents/ally.md) and posts:
+   - a summary thread with the severity counts (posted as closed, so it never blocks a merge);
+   - one active thread per finding, anchored inline to its file and line;
+   - the fix as a `` ```suggestion `` block spanning the element's lines, when it's a safe drop-in replacement (see below), otherwise as a normal code block.
+
+   Every thread carries a hidden marker, so re-running the build on the same PR doesn't repeat findings that are already there.
+4. **Fail on Ally findings** — fails the build when any finding is at or above `failOn` in `.allyconfig.json`. The build also fails, with an explanatory PR comment, when Ally errors or its output can't be parsed — never silently reported as "no findings".
+
+**When a fix becomes a suggestion.** Ally's reported line numbers are approximate, and it quotes multi-line elements on one line, so a suggestion is only used when the script can prove which element the fix replaces: the fix is exactly one XML element, and the file has an element of the same control that either matches the finding's `Element` quote (ignoring whitespace) or encloses the reported line *and* shares an identifying attribute with the fix (`x:Name`, `Text`, `Source`, `Title`, `Placeholder`, `IconImageSource`, `Command` or `Clicked`). Fixes that replace a control with a different one, or with several elements (e.g. adding a `Label` next to a `Picker`), stay plain code blocks — applying the suggestion with one click must never break the XAML. The step log explains each decision, e.g. `suggestion for lines 91-95 (reported line 78)` or `plain comment, not a suggestion because the fix is not exactly one XML element`.
+
+#### Setup
+
+1. **Add the agent and config.** Copy `.github/agents/ally.md` into your repo at the same path, then run `/ally config` to generate `.allyconfig.json` and commit both.
+2. **Copy the pipeline and script** as listed in the table above, and commit them.
+3. **Create the pipeline.** Pipelines → New pipeline → Azure Repos Git → your repo → Existing Azure Pipelines YAML file → pick `ally-audit.yml`.
+4. **Add the Copilot token.** In the pipeline, Edit → Variables → New variable, name `COPILOT_GITHUB_PAT`, value a GitHub personal access token for an account with Copilot access (a fine-grained token needs the *Copilot Requests* permission). Tick **Keep this value secret**. Copilot is always billed GitHub-side, so a token is needed even though the code lives in Azure DevOps. The pipeline passes it to the CLI as `COPILOT_GITHUB_TOKEN`.
+5. **Let the pipeline comment on PRs.** Project Settings → Repositories → your repo → Security → find **&lt;Project&gt; Build Service (&lt;organization&gt;)** → set **Contribute to pull requests** to **Allow**. If the project setting *Limit job authorization scope to current project* (Project Settings → Pipelines → Settings) is off, the identity is **Project Collection Build Service (&lt;organization&gt;)** instead.
+6. **Run it on pull requests.** Azure Repos ignores `pr:` triggers in YAML, so the pipeline has `trigger: none` and runs through a branch policy: Project Settings → Repositories → your repo → Policies → your target branch (e.g. `main`) → **Build validation** → **+** → pick the pipeline. Set it to **Required** if Ally's findings should block the merge.
+
+#### Pinning the model
+
+The pipeline has a `copilotModel` parameter, the equivalent of the GitHub workflow's `copilot-model` input. When it's set, the Run Ally step exports `COPILOT_MODEL`; when it's empty (the default), the Copilot CLI uses your backend/org default, which can change between runs. PR builds always use the parameter's default, so pin it in the file:
+
+```yaml
+parameters:
+- name: copilotModel
+  displayName: 'Copilot model to pin (e.g. claude-opus-4-5). Leave empty to use the Copilot default.'
+  type: string
+  default: 'claude-opus-4-5'
+```
+
+When you queue the pipeline by hand, the parameter also appears as a text box. The Run Ally log prints which model was used. Model availability depends on your Copilot plan; run `/model` in the Copilot CLI to see the exact names.
+
+The pipeline installs the latest `@github/copilot` on every run. For fully reproducible runs, pin it the way the GitHub workflow does, e.g. `npm install -g @github/copilot@<version>`.
+
+#### Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| "Run Ally" is skipped with *Condition was not met* | No `.xaml` file changed in the PR, or the run wasn't a PR build (a manual run has no target branch). Check the "Find changed XAML files" log. |
+| Posting fails with HTTP 403 and `TF401027: You need the Git 'PullRequestContribute' permission` | The build service can't comment on PRs. See setup step 5; the error names the identity. |
+| A *"Ally audit report could not be parsed"* comment | Ally answered without the report (for example, it asked a question instead). The step already retried once; re-run the build, and consider pinning the model. The comment is closed automatically once a later run parses. |
+| A *"Ally audit failed to run"* comment | The Copilot CLI exited with an error — usually a missing or invalid `COPILOT_GITHUB_PAT`, or a model your plan can't use. The comment includes the CLI output. |
+| A re-run doesn't post anything new | Findings already on the PR are skipped on purpose. Delete Ally's old threads (resolving them isn't enough) to have them posted again. |
+| A fix shows as a code block, not a suggestion | Check the "Post Ally findings to PR" log: each finding says whether it became a suggestion and, if not, why. |
+
 ### Why the check still fails despite posting comments
 
-**This is intentional, not redundant.** The inline comments are for *visibility and actionability*: what's wrong, exactly where, and how to fix it. The failing check is what *enforces* the gate: nothing about a PR comment stops the PR from being merged unless a required status check backs it up, so if the check always passed, `failOn` would be purely decorative. Concretely: a finding's severity meeting or exceeding `failOn` fails the check even though the same finding is already visible as a comment. To change what's enforced, adjust `failOn` in `.allyconfig.json` (e.g. `"major"` to also block on major findings, or `"info"` to fail on any finding) — no workflow change needed, since the gate reads that value at run time.
+**This is intentional, not redundant.** This applies to both the GitHub check and the Azure DevOps build. The inline comments are for *visibility and actionability*: what's wrong, exactly where, and how to fix it. The failing check is what *enforces* the gate: nothing about a PR comment stops the PR from being merged unless a required status check backs it up, so if the check always passed, `failOn` would be purely decorative. Concretely: a finding's severity meeting or exceeding `failOn` fails the check even though the same finding is already visible as a comment. To change what's enforced, adjust `failOn` in `.allyconfig.json` (e.g. `"major"` to also block on major findings, or `"info"` to fail on any finding) — no workflow change needed, since the gate reads that value at run time.
 
 ### Sample app (CI self-test)
 
-[`examples/sample-app/`](examples/sample-app/) is a small but functional and buildable MAUI app — Login page → Home (a Shell with a flyout) → Settings → Profile — that exists to exercise the CI integration for real, not just document it. Its XAML is a clean, accessible reference implementation (localized `SemanticProperties`, explicit `Slider` ranges, persistent `Picker` labels, and so on) rather than a fixture seeded with violations, so a passing `/ally diff` run demonstrates the pipeline working end-to-end on real, working screens. [`.github/workflows/sample-app-audit.yml`](.github/workflows/sample-app-audit.yml) runs the GitHub Actions integration against it on every PR that touches the sample files, the agent, or the reusable workflow, so a broken pipeline shows up as a failed check instead of silently rotting. It relies on the same `copilot-requests: write` permission described above — no secret needed.
+[`examples/sample-app/`](examples/sample-app/) is a small but functional and buildable MAUI app — Login page → Home (a Shell with a flyout) → Settings → Profile — that exists to exercise the CI integration for real, not just document it. Its XAML is a clean, accessible reference implementation (localized `SemanticProperties`, explicit `Slider` ranges, persistent `Picker` labels, and so on) rather than a fixture seeded with violations, so a passing `/ally diff` run demonstrates the pipeline working end-to-end on real, working screens. [`.github/workflows/sample-app-audit.yml`](.github/workflows/sample-app-audit.yml) runs the GitHub Actions integration against it on every PR that touches the sample files, the agent, or the reusable workflow, so a broken pipeline shows up as a failed check instead of silently rotting. It relies on the same `copilot-requests: write` permission described above — no secret needed. There's no equivalent self-test for the Azure DevOps pipeline, since this repo isn't hosted in Azure DevOps.
 
 ---
 
@@ -301,11 +363,16 @@ After applying fixes, verify accessibility manually:
 examples/
   sample-app/             ← Clean, functional MAUI reference app used to self-test CI
   github-actions/         ← Caller workflow example for consuming repos
+  azure-devops/
+    ally-audit.yml        ← Azure DevOps pipeline to copy into consuming repos
+    scripts/
+      ally-azure-comments.js ← Posts findings to the PR and sets the failOn gate
 .allyconfig.json          ← Config for auditing examples/sample-app/ in this repo
 README.md                 ← This file
 ```
 
-In a consuming project, only `.github/agents/ally.md` is copied — everything
+In a consuming project, only `.github/agents/ally.md` is copied — plus, on
+Azure DevOps, the pipeline and script from `examples/azure-devops/`. Everything
 else here is specific to this repo (the CI examples and the sample app that
 self-tests them). Your own `.allyconfig.json` is generated by `/ally config`,
 not copied.
