@@ -1,0 +1,131 @@
+# Ally Accessibility Audit — Azure DevOps pipeline
+#
+# Runs a read-only `/ally diff` audit on the XAML files a pull request changes,
+# posts the findings to the PR (a summary thread plus one inline thread per
+# finding, with a ```suggestion block when the fix is a safe drop-in), and
+# fails the build when findings reach `failOn` in .allyconfig.json.
+#
+# Setup — see "Running Ally in CI > Azure DevOps" in the README:
+#   1. Copy .github/agents/ally.md into your repo at the same path, and run
+#      /ally config to generate .allyconfig.json.
+#   2. Copy this file into your repo, and scripts/ally-azure-comments.js to
+#      scripts/ally-azure-comments.js (the "Post Ally findings to PR" step runs
+#      it from there).
+#   3. Add a secret pipeline variable COPILOT_GITHUB_PAT.
+#   4. Allow the build service to "Contribute to pull requests".
+#   5. Add this pipeline as a Build validation policy on your target branch.
+
+trigger: none
+
+parameters:
+- name: copilotModel
+  displayName: 'Copilot model to pin (e.g. claude-opus-4-5). Leave empty to use the Copilot default.'
+  type: string
+  default: ''
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+- checkout: self
+  fetchDepth: 0
+  persistCredentials: true
+
+- task: NodeTool@0
+  displayName: 'Use Node 20'
+  inputs:
+    versionSpec: '20.x'
+
+- script: npm install -g @github/copilot
+  displayName: 'Install Copilot CLI'
+
+- script: |
+    TARGET="${TARGET_BRANCH#refs/heads/}"
+
+    # A build queued by hand has no PR, so there is nothing to diff against: skip
+    # cleanly. Azure passes an undefined variable through as its literal macro text.
+    case "$TARGET" in
+      '' | '$('*)
+        echo "##[warning]Not a pull request build, so there is no target branch to diff against. Skipping the Ally audit."
+        echo "##vso[task.setvariable variable=xamlFiles]"
+        exit 0
+        ;;
+    esac
+
+    # In a PR build, any failure here (e.g. fetching a renamed or deleted target
+    # branch) must fail the step. Otherwise the file list comes out empty, every
+    # later step is skipped, and the check passes without auditing the PR.
+    set -eo pipefail
+    git fetch origin "$TARGET"
+    git diff --name-only --diff-filter=ACMR "origin/$TARGET...HEAD" -- '*.xaml' > ally-changed-files.txt
+    git diff -U3 --diff-filter=ACMR "origin/$TARGET...HEAD" -- '*.xaml' > ally-diff.patch
+    FILES=$(tr '\n' ' ' < ally-changed-files.txt)
+    echo "Changed XAML: $FILES"
+    echo "##vso[task.setvariable variable=targetBranch]$TARGET"
+    echo "##vso[task.setvariable variable=xamlFiles]$FILES"
+  displayName: 'Find changed XAML files'
+  env:
+    TARGET_BRANCH: $(System.PullRequest.TargetBranch)
+
+- script: |
+    {
+      echo "/ally diff origin/$(targetBranch)"
+      echo
+      echo "This is a non-interactive run (see 'Interactive vs. Non-Interactive Runs' in .github/agents/ally.md). Never pause for a decision and never ask questions: report a decision point as an ordinary finding instead."
+      echo
+      echo "The scope is already computed. Do not run git or any shell command."
+      echo "- ally-changed-files.txt lists the changed XAML files, one repo-relative path per line. Use exactly this list."
+      echo "- ally-diff.patch is the unified diff of those files. Restrict findings to the changed hunks (plus or minus 3 lines), per the /ally diff definition."
+      echo
+      echo "Read ally-changed-files.txt, ally-diff.patch and every file in scope in full with your read tool before reporting anything. Every Element quote must be verbatim from the file you read, and every File value must be a path from the repository root with the real line numbers of the current file. Respect .allyconfig.json at the repo root. Do not write or modify any files."
+      echo
+      echo "Output the full findings report as Markdown, following the Findings Report Format contract in ally.md exactly (the FINDINGS_SUMMARY marker line and one '### FINDING: <RULE_ID>' block per finding). CI parses it verbatim. If there are no findings, still output the FINDINGS_SUMMARY line with all counts 0."
+    } > ally-prompt.txt
+
+    # Pin the model like the GitHub Actions workflow's copilot-model input does;
+    # empty means the CLI uses whatever your Copilot backend/org policy defaults to.
+    if [ -n "$INPUT_COPILOT_MODEL" ]; then
+      export COPILOT_MODEL="$INPUT_COPILOT_MODEL"
+      echo "Using Copilot model: $COPILOT_MODEL"
+    else
+      echo "No Copilot model pinned; using the Copilot default."
+    fi
+
+    # The model occasionally answers without the report; try once more before giving up.
+    set +e
+    for attempt in 1 2; do
+      copilot -p "$(cat ally-prompt.txt)" \
+        --agent ally \
+        --allow-tool 'read' \
+        --deny-tool 'write' \
+        --no-ask-user \
+        -s > ally-report.md 2> ally-stderr.log
+      CODE=$?
+      cat ally-report.md
+      cat ally-stderr.log >&2
+      if [ "$CODE" -eq 0 ] && grep -q 'FINDINGS_SUMMARY' ally-report.md; then break; fi
+      echo "Attempt $attempt did not produce a findings report (exit $CODE)."
+    done
+    echo "##vso[task.setvariable variable=allyExitCode]$CODE"
+    exit 0
+  displayName: 'Run Ally'
+  condition: ne(variables['xamlFiles'], '')
+  env:
+    COPILOT_GITHUB_TOKEN: $(COPILOT_GITHUB_PAT)
+    INPUT_COPILOT_MODEL: ${{ parameters.copilotModel }}
+
+- script: node scripts/ally-azure-comments.js
+  displayName: 'Post Ally findings to PR'
+  condition: and(succeeded(), ne(variables['xamlFiles'], ''))
+  env:
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+    ALLY_REPORT_PATH: ally-report.md
+    ALLY_CHANGED_FILES_PATH: ally-changed-files.txt
+    ALLY_STDERR_PATH: ally-stderr.log
+    ALLY_EXIT_CODE: $(allyExitCode)
+
+- script: |
+    echo "##[error]Ally found accessibility issues at or above the configured failOn level ($(allyFailingTiers)). See the PR comments."
+    exit 1
+  displayName: 'Fail on Ally findings'
+  condition: and(succeeded(), ne(variables['xamlFiles'], ''), eq(variables['allyShouldFail'], 'true'))

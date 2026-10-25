@@ -7,58 +7,39 @@
 ## Features
 
 - 🔍 **Automated XAML accessibility audits** — scans active files or entire projects
-- 🌐 **Localization-first** — all generated strings use a markup-extension binding to the resource class; never hardcoded values
+- 🌐 **Localization-first** — generated strings use a markup-extension binding to your resource class, not hardcoded values
 - 🛡️ **WCAG 2.2 AA enforcement** — rule catalog covering critical blockers through informational notes
 - ⚙️ **Configurable** — `.allyconfig.json` controls resource paths, key naming, severity gates, and exclusions
 - 🧩 **Optional `maui-accessibility` skill integration** — treated as the semantics authority when installed; falls back to built-in rules if missing or erroring
 - ✅ **Confirmation-gated writes** — nothing is written until you explicitly approve the apply checkpoint
 - 🔕 **Suppressions** — inline or config-level, always requiring a reason
+- 🤖 **Pull request checks** — runs in GitHub Actions or Azure DevOps, comments each finding on the changed line, and fails the check at a severity you choose
 
 ---
 
 ## Getting Started
 
-### 1. Load the agent
+### 1. Add Ally to your repository
 
-The agent prompt lives at `.github/agents/ally.md`. Open the Copilot chat panel in your IDE, ensure the agent is listed in the Tools panel, then run:
+Copy [`.github/agents/ally.md`](.github/agents/ally.md) from this repo into your own repository, at the same path (`.github/agents/ally.md`). That file is the whole agent; nothing else needs copying to use Ally in your IDE.
 
-```
-/ally feedback
-```
+Then open the Copilot chat panel in your IDE and check that Ally is listed in the Tools panel.
 
-If Ally responds with findings (or confirms no issues), the agent loaded correctly.
-
-> **Tip:** If Ally can read your code but cannot write files, the `edit` tool identifier in `ally.md` may not match your IDE. Check the Tools list in the chat panel and update the `tools` frontmatter accordingly.
+> **Tip:** If Ally can read your code but can't write files, the `edit` tool identifier in `ally.md` may not match your IDE. Check the Tools list in the chat panel and update the `tools` frontmatter accordingly.
 
 ### 2. Configure the project
 
-Run the configuration wizard once before the first scan (or whenever you need to update settings):
+Ally won't scan without a project configuration, so run the configuration wizard first:
 
 ```
 /ally config
 ```
 
-The wizard asks **one question at a time** and detects your `.resx` resource files automatically. It produces a `.allyconfig.json` file at the project root, then starts an audit using that configuration.
+The wizard asks **one question at a time** and detects your `.resx` resource files automatically. It saves `.allyconfig.json` at the project root, then starts an audit using that configuration — which also confirms the agent loaded correctly. Run it again whenever you need to change settings.
 
 ### 3. Audit your XAML
 
-**Read-only audit (no files written):**
-
-```
-/ally feedback
-```
-
-**Audit only what changed, relative to a base branch:**
-
-```
-/ally diff main
-```
-
-**Audit + apply fixes:**
-
-```
-/ally apply
-```
+You're ready to use the commands below. A typical loop is a read-only `/ally feedback` to see what Ally finds, then `/ally apply` to fix it.
 
 ---
 
@@ -71,52 +52,48 @@ The wizard asks **one question at a time** and detects your `.resx` resource fil
 | `/ally config` | Interactive setup wizard. Detects `.resx` files, namespace aliases, and key naming conventions. Saves `.allyconfig.json`. |
 | `/ally apply` | Full audit with an apply checkpoint. Writes XAML and `.resx` changes only after you confirm. |
 
----
+For example:
 
-## Running Ally in CI
-
-Ally can run in CI as a read-only check: it invokes `/ally diff` against the pull request's actual target branch, reporting findings only for changed hunks in the files a PR actually touches — not a full-repo `/ally feedback` pass. It always uses the PR's real target branch (from the platform's own PR metadata), not `.allyconfig.json`'s `defaultBaseBranch` — that field only matters for a local/manual `/ally diff` with no `[base-branch]` argument, so it stays correct even for repos where PRs sometimes target something other than `main` (e.g. a release branch). `/ally apply` is deliberately left out of automation — the apply checkpoint's confirmation step is a safety feature, not a formality, and there's no one in CI to confirm it. Always run `/ally apply` manually, locally.
-
-Findings are posted as a single PR review with one inline comment per finding, anchored to the exact file and line, plus a separate standalone summary comment with the severity counts — not a flat comment dump.
-
-> Only GitHub Actions is currently supported. Azure DevOps support isn't currently maintained.
-
-### Setup
-
-1. Copy `.github/agents/ally.md` into the target repository, at the same path (`.github/agents/ally.md`). `.allyconfig.json` isn't something to copy from this template — it's project-specific. In the target repository, run `/ally config` (if it hasn't been already) to generate and commit one.
-2. Add a caller workflow that invokes the reusable workflow in this repo — see [`examples/github-actions/ally-audit-caller.yml`](examples/github-actions/ally-audit-caller.yml).
-3. Grant the caller job at least:
-   ```yaml
-   permissions:
-     contents: read
-     pull-requests: write
-     copilot-requests: write
-   ```
-   A reusable workflow can never be granted more than its caller allows, and a repo's default token permissions (Settings → Actions → General → Workflow permissions) are often read-only — without this, the job fails workflow validation before it even starts.
-
-### Authentication
-
-`copilot-requests: write` above is all the auth this needs — it lets the Copilot CLI authenticate with the job's own automatic `GITHUB_TOKEN`, no secret or PAT required. This only fails to work if your organization's Copilot policy blocks CLI usage outright, which is a Copilot administration setting to fix, not something to work around in the workflow.
-
-### Pinning the model (recommended)
-
-By default, `copilot` uses whatever model your Copilot backend/org policy currently defaults to — which can change between CI runs as that policy changes, silently shifting what Ally finds. To pin a specific model instead, pass the reusable workflow's `copilot-model` input:
-
-```yaml
-uses: AndreeaP19/ally-maui-accessibility-agent/.github/workflows/ally-audit.yml@<ref>
-with:
-  copilot-model: claude-opus-4-5
+```
+/ally feedback
+/ally diff main
+/ally apply
 ```
 
-This sets the CLI's `COPILOT_MODEL` environment variable for the audit step only. Leave it unset to keep following your org's default. Model availability depends on your Copilot plan — check what's available before pinning one.
+---
 
-### Why the check still fails despite posting comments
+## Apply Checkpoint
 
-**This is intentional, not redundant.** The inline comments are for *visibility and actionability*: what's wrong, exactly where, and how to fix it. The failing check is what *enforces* the gate: nothing about a PR comment stops the PR from being merged unless a required status check backs it up, so if the check always passed, `failOn` would be purely decorative. Concretely: a finding's severity meeting or exceeding `failOn` fails the check even though the same finding is already visible as a comment. To change what's enforced, adjust `failOn` in `.allyconfig.json` (e.g. `"major"` to also block on major findings, or `"info"` to fail on any finding) — no workflow change needed, since the gate reads that value at run time.
+When you run `/ally apply`, Ally shows a summary before writing anything:
 
-### Sample app (CI self-test)
+```
+Ally Accessibility Agent — Apply Checkpoint
 
-[`examples/sample-app/`](examples/sample-app/) is a small but functional and buildable MAUI app — Login page → Home (a Shell with a flyout) → Settings → Profile — that exists to exercise the CI integration for real, not just document it. Its XAML is a clean, accessible reference implementation (localized `SemanticProperties`, explicit `Slider` ranges, persistent `Picker` labels, and so on) rather than a fixture seeded with violations, so a passing `/ally diff` run demonstrates the pipeline working end-to-end on real, working screens. [`.github/workflows/sample-app-audit.yml`](.github/workflows/sample-app-audit.yml) runs the GitHub Actions integration against it on every PR that touches the sample files, the agent, or the reusable workflow, so a broken pipeline shows up as a failed check instead of silently rotting. It relies on the same `copilot-requests: write` permission described above — no secret needed.
+Scope:
+- Mode: apply
+- Files scanned: 4
+- maui-accessibility skill: available / unavailable / disabled
+
+Planned changes:
+- XAML files: 2
+- RESX keys: 5 additions
+- Constants: 5 additions
+- Config: none
+
+Findings by severity:
+🔴 Critical: 1   🟠 Major: 2   🟡 Minor: 1   ⚪ Info: 5
+
+Medium-confidence items in this set: 1 (review recommended)
+Low-confidence items: report-only, not applied
+
+Apply these changes?
+[A] Apply all
+[B] Apply only critical + major
+[C] Show full diff
+[D] Cancel
+```
+
+Nothing is written until you select **[A]** or **[B]**.
 
 ---
 
@@ -145,15 +122,15 @@ The wizard creates this file for you. A typical configuration looks like:
 | `resxPath` | string | Path to the `.resx` file used for accessibility string keys. |
 | `constantsFile` | string | Path to a constants file. Required (alongside `localize: false`) when the project has no `.resx` file; optional supplement otherwise. |
 | `constantsClassPath` | string | Fully-qualified class path for the constants class (e.g. `CoreConstants.TranslationKeys`), when `constantsFile` is set. |
-| `localize` | boolean | `false` disables `.resx` key generation — Ally itself then emits plain string literals for any new property it adds, instead of a markup-extension binding. `MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` fires the other way around: when `true` and an *existing* string bypasses the localization markup extension, since that's a live deviation from the project's own policy. |
+| `localize` | boolean | `false` disables `.resx` key generation: Ally emits plain string literals for any new property it adds, instead of a markup-extension binding. See [Localization](#localization) for how `MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` depends on this. |
 | `localizeNamespace` | string | The `xmlns:` alias used to reference the localization markup extension in XAML (e.g. `strings`). |
 | `keyPrefix` | string | Prefix applied to generated `.resx` keys (e.g. `A11y`). |
 | `placeholderValue` | string | Placeholder value written for new `.resx` entries until translated. Defaults to `"TODO: add translation"`. |
 | `headingDefaultLevel` | string | Default `SemanticProperties.HeadingLevel` suggested for section titles (e.g. `"Level1"`). |
 | `keyConvention` | string | `"Pascal_Underscore"`, `"SCREAMING_SNAKE"`, `"dot.notation"`, or `"custom"` (with a `keyTemplate`). |
 | `constConvention` | string | Naming convention for generated C# constants (e.g. `"PascalCase"`). |
-| `orderDetection` | boolean | Opt-in, off by default. Set to `true` to enable heuristic detection of reading-order mismatches (`MAUI_A11Y_003_READING_ORDER`) — `Grid.Row`/`Grid.Column` visual order differing from declaration order, a describing `Label` declared after its control, or absolute/translation-based visual reordering. Left unset or `false`, Ally never fires that rule, even if one of those patterns is present. |
-| `defaultBaseBranch` | string | Base branch `/ally diff` uses when `[base-branch]` is omitted (e.g. `"main"`). |
+| `orderDetection` | boolean | Opt-in, off by default. Set to `true` to enable heuristic detection of reading-order mismatches (`MAUI_A11Y_003_READING_ORDER`): `Grid.Row`/`Grid.Column` visual order differing from declaration order, a describing `Label` declared after its control, or absolute/translation-based visual reordering. Left unset or `false`, Ally never fires that rule, even if one of those patterns is present. |
+| `defaultBaseBranch` | string | Base branch `/ally diff` uses when `[base-branch]` is omitted (e.g. `"main"`). CI ignores it and always uses the PR's real target branch. |
 | `failOn` | string | Minimum severity that fails a CI gate: `"critical"`, `"major"`, `"minor"`, or `"info"`. |
 | `mauiAccessibilitySkill` | object | Optional integration with a `maui-accessibility` skill: `enabled`, `skillName`, `required`, `fallbackOnMissing`, `fallbackOnError`. |
 | `rules` | object | Per-rule `enabled`/`severity` overrides, keyed by rule ID. |
@@ -163,7 +140,11 @@ The wizard creates this file for you. A typical configuration looks like:
 
 ---
 
-## Severity Tiers
+## Severity and Confidence
+
+Every finding has a severity, which says how badly it affects users, and a confidence, which decides what Ally does with it.
+
+### Severity tiers
 
 | Severity | Meaning |
 |---|---|
@@ -171,6 +152,8 @@ The wizard creates this file for you. A typical configuration looks like:
 | 🟠 **Major** | Usable but degraded experience |
 | 🟡 **Minor** | Suboptimal, not a conformance failure |
 | ⚪ **Info** | Note or suggestion |
+
+### Confidence
 
 | Confidence | Behavior |
 |---|---|
@@ -198,50 +181,36 @@ The wizard creates this file for you. A typical configuration looks like:
 
 ---
 
-## Apply Checkpoint
-
-When you run `/ally apply`, Ally shows a summary before writing anything:
-
-```
-Ally — Apply Checkpoint
-
-Findings:  🔴 Critical 2   🟠 Major 5   🟡 Minor 3   ⚪ Info 1
-Planned:   4 XAML files · 7 new resource keys
-
-Apply these changes?
-[A] Apply all
-[B] Apply critical + major only
-[C] Show full diff
-[D] Cancel
-```
-
-Nothing is written until you select **[A]** or **[B]**.
-
----
-
 ## Localization
 
-All generated accessibility strings are emitted through the configured
-localization markup extension (the `localizeNamespace` alias):
+How Ally writes new accessibility strings depends on your configuration:
 
-```xml
-SemanticProperties.Description="{strings:Localize A11y_NotesBtn_Description}"
-```
+- **Localized (`localize: true`, the default).** Strings are emitted through the configured localization markup extension (the `localizeNamespace` alias):
 
-New resource keys are added to the `.resx` file with the placeholder value `TODO: add translation` (configurable via `placeholderValue`). The suggested English text appears in the audit report only — it is never committed to the `.resx` automatically.
+  ```xml
+  SemanticProperties.Description="{strings:Localize A11y_NotesBtn_Description}"
+  ```
+
+  New keys are added to the `.resx` file with the placeholder value `TODO: add translation` (configurable via `placeholderValue`). The suggested English text appears only in the audit report; it's never committed to the `.resx` automatically.
+- **Constants file (`constantsFile` set).** Each new key also gets a C# constant whose value is exactly the `.resx` key.
+- **Hardcoded (`localize: false`).** Ally emits plain string literals for any new property it adds.
+
+`MAUI_A11Y_009_NON_LOCALIZED_A11Y_TEXT` only fires when `localize` is `true` and an *existing* accessibility string bypasses the markup extension — a deviation from the project's own policy. With `localize: false`, hardcoded strings are the accepted baseline, so the rule doesn't fire.
 
 ---
 
 ## Suppressions
 
-### Inline suppression (requires a reason)
+Both kinds of suppression require a reason.
+
+### Inline suppression
 
 ```xml
 <!-- accessibility-disable-next-line MAUI_A11Y_003_READING_ORDER: visual order intentional -->
 <Grid ...>
 ```
 
-### Config suppression (requires a reason)
+### Config suppression
 
 ```json
 {
@@ -289,6 +258,131 @@ After applying fixes, verify accessibility manually:
 
 ---
 
+## Running Ally in CI
+
+In CI, Ally runs as a read-only check on each pull request:
+
+- **It audits only what the PR changed.** It runs `/ally diff` and reports findings only for changed hunks (±3 lines) in the XAML files the PR touches — not a full-repo `/ally feedback` pass.
+- **It diffs against the PR's real target branch**, taken from the platform's PR metadata, not `defaultBaseBranch` from `.allyconfig.json`. So it stays correct when a PR targets something other than `main`, such as a release branch.
+- **It never applies fixes.** `/ally apply` is left out of automation on purpose: its confirmation step is a safety feature, and there's no one in CI to confirm it. Run `/ally apply` locally.
+
+Each finding is posted as an inline comment on its file and line, alongside a summary comment with the severity counts. Two CI hosts are supported:
+
+- **[GitHub Actions](#github-actions)** — a reusable workflow you call from your repo. Findings are posted as a single PR review.
+- **[Azure DevOps](#azure-devops)** — a pipeline and a small Node script you copy into your repo. Azure DevOps has no review object, so each finding is its own PR thread.
+
+### Why the check fails even though the findings are posted as comments
+
+This is intentional, on both hosts. The comments give *visibility*: what's wrong, exactly where, and how to fix it. The failing check *enforces* the gate, because a comment alone doesn't stop a PR from being merged — only a required status check does. Without it, `failOn` would be purely decorative.
+
+So a finding at or above `failOn` fails the check even though the same finding is already visible as a comment. To change what's enforced, set `failOn` in `.allyconfig.json` — for example `"major"` to also block on major findings, or `"info"` to fail on any finding. No workflow change is needed, since the gate reads the value at run time.
+
+### GitHub Actions
+
+#### Setup
+
+1. **Add the agent and config.** Copy `.github/agents/ally.md` into your repo (see [Getting Started](#1-add-ally-to-your-repository)), run `/ally config`, and commit both. `.allyconfig.json` isn't copied from this repo — it's project-specific.
+2. **Add a caller workflow** that invokes the reusable workflow in this repo — see [`examples/github-actions/ally-audit-caller.yml`](examples/github-actions/ally-audit-caller.yml).
+3. **Grant the caller job at least these permissions:**
+   ```yaml
+   permissions:
+     contents: read
+     pull-requests: write
+     copilot-requests: write
+   ```
+   A reusable workflow can never be granted more than its caller allows. A repo's default token permissions (Settings → Actions → General → Workflow permissions) are often read-only, and without this the job fails workflow validation before it even starts.
+
+#### Authentication
+
+`copilot-requests: write` is all the authentication this needs. It lets the Copilot CLI use the job's own automatic `GITHUB_TOKEN`, so no secret or PAT is required. It only fails if your organization's Copilot policy blocks CLI usage outright, which is a Copilot administration setting to fix rather than something to work around in the workflow.
+
+#### Pinning the model (recommended)
+
+By default, `copilot` uses whatever model your Copilot backend or org policy currently defaults to. That can change between CI runs, silently shifting what Ally finds. To pin a model, pass the reusable workflow's `copilot-model` input:
+
+```yaml
+uses: AndreeaP19/ally-maui-accessibility-agent/.github/workflows/ally-audit.yml@<ref>
+with:
+  copilot-model: claude-opus-4-5
+```
+
+This sets the CLI's `COPILOT_MODEL` environment variable for the audit step only. Leave it unset to keep following your org's default. Model availability depends on your Copilot plan, so check what's available before pinning one.
+
+#### Self-test with the sample app
+
+[`examples/sample-app/`](examples/sample-app/) is a small, buildable MAUI app (Login → Home, a Shell with a flyout → Settings → Profile) that exercises the GitHub integration for real. Its XAML is a clean, accessible reference implementation — localized `SemanticProperties`, explicit `Slider` ranges, persistent `Picker` labels — rather than a fixture seeded with violations, so a passing `/ally diff` run shows the pipeline working end to end.
+
+[`.github/workflows/sample-app-audit.yml`](.github/workflows/sample-app-audit.yml) runs it on every PR that touches the sample files, the agent, or the reusable workflow, so a broken pipeline shows up as a failed check instead of silently rotting. It relies on the same `copilot-requests: write` permission — no secret needed. There's no equivalent self-test for Azure DevOps, since this repo isn't hosted there.
+
+### Azure DevOps
+
+The pipeline lives in [`examples/azure-devops/`](examples/azure-devops/). Unlike the GitHub integration, it isn't a reusable template: you copy two files into your repo.
+
+| File | Copy to |
+|---|---|
+| [`examples/azure-devops/ally-audit.yml`](examples/azure-devops/ally-audit.yml) | anywhere in your repo, e.g. the root |
+| [`examples/azure-devops/scripts/ally-azure-comments.js`](examples/azure-devops/scripts/ally-azure-comments.js) | `scripts/ally-azure-comments.js` — the "Post Ally findings to PR" step runs it from there; change that path in the pipeline if you put it elsewhere |
+
+#### Setup
+
+1. **Add the agent and config.** Copy `.github/agents/ally.md` into your repo (see [Getting Started](#1-add-ally-to-your-repository)), run `/ally config`, and commit both.
+2. **Copy the pipeline and script** as listed in the table above, and commit them.
+3. **Create the pipeline.** Pipelines → New pipeline → Azure Repos Git → your repo → Existing Azure Pipelines YAML file → pick `ally-audit.yml`.
+4. **Add the Copilot token.** In the pipeline, open Edit → Variables → New variable. Name it `COPILOT_GITHUB_PAT`, set its value to a GitHub personal access token for an account with Copilot access (a fine-grained token needs the *Copilot Requests* permission), and tick **Keep this value secret**. Copilot is always billed GitHub-side, so a token is needed even though the code lives in Azure DevOps. The pipeline passes it to the CLI as `COPILOT_GITHUB_TOKEN`.
+5. **Let the pipeline comment on PRs.** Project Settings → Repositories → your repo → Security → find **&lt;Project&gt; Build Service (&lt;organization&gt;)** → set **Contribute to pull requests** to **Allow**. If *Limit job authorization scope to current project* (Project Settings → Pipelines → Settings) is off, the identity is **Project Collection Build Service (&lt;organization&gt;)** instead.
+6. **Run it on pull requests.** Azure Repos ignores `pr:` triggers in YAML, so the pipeline has `trigger: none` and runs through a branch policy: Project Settings → Repositories → your repo → Policies → your target branch (e.g. `main`) → **Build validation** → **+** → pick the pipeline. Set it to **Required** if Ally's findings should block the merge.
+
+#### Pinning the model
+
+The pipeline has a `copilotModel` parameter, the equivalent of the GitHub workflow's `copilot-model` input. When it's set, the Run Ally step exports `COPILOT_MODEL`. When it's empty (the default), the Copilot CLI uses your backend or org default, which can change between runs.
+
+PR builds always use the parameter's default, so pin the model in the file:
+
+```yaml
+parameters:
+- name: copilotModel
+  displayName: 'Copilot model to pin (e.g. claude-opus-4-5). Leave empty to use the Copilot default.'
+  type: string
+  default: 'claude-opus-4-5'
+```
+
+When you queue the pipeline by hand, the parameter also appears as a text box, and the Run Ally log prints which model was used. Model availability depends on your Copilot plan; run `/model` in the Copilot CLI to see the exact names.
+
+The pipeline also installs the latest `@github/copilot` on every run. For fully reproducible runs, pin it the way the GitHub workflow does, e.g. `npm install -g @github/copilot@<version>`.
+
+#### What the pipeline does
+
+1. **Find changed XAML files** — diffs the PR against its target branch (`System.PullRequest.TargetBranch`), writing the changed `.xaml` files to `ally-changed-files.txt` and their unified diff to `ally-diff.patch`. If nothing matches, the remaining steps are skipped.
+2. **Run Ally** — runs `/ally diff` through the Copilot CLI with read-only tools (`--allow-tool read --deny-tool write --no-ask-user`). The prompt hands Ally those two files as its scope, so it never needs to run git. If the output has no `FINDINGS_SUMMARY` marker, it retries once.
+3. **Post Ally findings to PR** — `ally-azure-comments.js` parses the [Findings Report Format](.github/agents/ally.md) and posts:
+   - a summary thread with the severity counts, posted as closed so it never blocks a merge;
+   - one active thread per finding, anchored inline to its file and line;
+   - each fix as a `` ```suggestion `` block spanning the element's lines when it's a safe drop-in replacement (see below), otherwise as a normal code block.
+
+   Every thread carries a hidden marker, so re-running the build on the same PR doesn't repeat findings that are already there.
+4. **Fail on Ally findings** — fails the build when any finding is at or above `failOn`. The build also fails, with an explanatory PR comment, when Ally errors or its output can't be parsed; that's never reported as "no findings".
+
+**When a fix becomes a suggestion.** Ally's reported line numbers are approximate, and it quotes multi-line elements on one line. So the script only uses a suggestion when it can prove which element the fix replaces:
+
+- the fix is exactly one XML element; and
+- the file has an element of the same control that either matches the finding's `Element` quote (ignoring whitespace), or encloses the reported line *and* shares an identifying attribute with the fix (`x:Name`, `Text`, `Source`, `Title`, `Placeholder`, `IconImageSource`, `Command` or `Clicked`).
+
+Fixes that replace a control with a different one, or with several elements (e.g. adding a `Label` next to a `Picker`), stay plain code blocks, because applying a suggestion with one click must never break the XAML. The step log explains each decision, e.g. `suggestion for lines 91-95 (reported line 78)` or `plain comment, not a suggestion because the fix is not exactly one XML element`.
+
+#### Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| "Run Ally" is skipped with *Condition was not met* | No `.xaml` file changed in the PR, or the run wasn't a PR build. A manual run has no target branch, so "Find changed XAML files" logs *Not a pull request build* and skips the audit. |
+| "Find changed XAML files" fails, e.g. with `fatal: couldn't find remote ref` | The PR's target branch couldn't be fetched or diffed (renamed, deleted, or a network error). The step fails on purpose: an empty file list would otherwise skip the audit and pass the check without auditing the PR. Re-run, or retarget the PR. |
+| Posting fails with HTTP 403 and `TF401027: You need the Git 'PullRequestContribute' permission` | The build service can't comment on PRs. See setup step 5; the error names the identity. |
+| A *"Ally audit report could not be parsed"* comment | Ally answered without the report (for example, it asked a question instead). The step already retried once; re-run the build, and consider pinning the model. The comment is closed automatically once a later run parses. |
+| A *"Ally audit failed to run"* comment | The Copilot CLI exited with an error, usually because `COPILOT_GITHUB_PAT` is missing or invalid, or the model isn't available on your plan. The comment includes the CLI's output and its error output (stderr). Stderr is kept out of the report itself, so a warning on a successful run can't end up inside a finding. |
+| A re-run doesn't post anything new | Findings already on the PR are skipped on purpose. Delete Ally's old threads (resolving them isn't enough) to have them posted again. |
+| A fix shows as a code block, not a suggestion | Check the "Post Ally findings to PR" log: each finding says whether it became a suggestion and, if not, why. |
+
+---
+
 ## Repository Structure
 
 ```
@@ -301,11 +395,16 @@ After applying fixes, verify accessibility manually:
 examples/
   sample-app/             ← Clean, functional MAUI reference app used to self-test CI
   github-actions/         ← Caller workflow example for consuming repos
+  azure-devops/
+    ally-audit.yml        ← Azure DevOps pipeline to copy into consuming repos
+    scripts/
+      ally-azure-comments.js ← Posts findings to the PR and sets the failOn gate
 .allyconfig.json          ← Config for auditing examples/sample-app/ in this repo
 README.md                 ← This file
 ```
 
-In a consuming project, only `.github/agents/ally.md` is copied — everything
+In a consuming project, only `.github/agents/ally.md` is copied — plus, on
+Azure DevOps, the pipeline and script from `examples/azure-devops/`. Everything
 else here is specific to this repo (the CI examples and the sample app that
 self-tests them). Your own `.allyconfig.json` is generated by `/ally config`,
 not copied.
