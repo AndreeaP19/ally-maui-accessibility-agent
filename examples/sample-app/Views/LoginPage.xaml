@@ -8,8 +8,7 @@
 
         <ImageButton Source="back_arrow.png"
                      Clicked="OnBackTapped"
-                     HorizontalOptions="Start"
-                     SemanticProperties.Description="{strings:Localize A11y_BackButton_Description}" />
+                     HorizontalOptions="Start" />
 
         <Label Text="Welcome back"
                FontSize="24"
@@ -20,11 +19,11 @@
 
         <Entry x:Name="PasswordEntry"
                Placeholder="Password"
-               IsPassword="True" />
+               IsPassword="True"
+               SemanticProperties.Description="Password field" />
 
         <HorizontalStackLayout Spacing="8">
-            <CheckBox x:Name="RememberMeCheck"
-                      SemanticProperties.Description="{strings:Localize A11y_RememberMeCheckbox_Description}" />
+            <CheckBox x:Name="RememberMeCheck" />
             <Label Text="Remember me" />
         </HorizontalStackLayout>
 

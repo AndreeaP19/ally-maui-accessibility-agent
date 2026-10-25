@@ -12,7 +12,8 @@
 
         <Button Text="Profile"
                 Clicked="OnProfileTapped"
-                HorizontalOptions="Fill" />
+                HorizontalOptions="Fill"
+                SemanticProperties.Description="Navigate to account settings" />
 
         <Label Text="Preferences"
                FontSize="20"
@@ -23,16 +24,13 @@
 
         <Label Text="Volume" />
         <Slider x:Name="VolumeSlider"
-                Minimum="0"
-                Maximum="1"
                 Value="{Binding Volume}"
                 SemanticProperties.Description="{strings:Localize A11y_VolumeSlider_Description}" />
 
         <Label x:Name="LanguageLabel" Text="Language" />
         <Picker x:Name="LanguagePicker"
                 Title="Language"
-                ItemsSource="{Binding Languages}"
-                SemanticProperties.Description="{strings:Localize A11y_LanguagePicker_Description}" />
+                ItemsSource="{Binding Languages}" />
 
     </VerticalStackLayout>
 </ContentPage>

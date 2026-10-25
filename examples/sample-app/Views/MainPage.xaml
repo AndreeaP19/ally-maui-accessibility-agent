@@ -3,18 +3,22 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="SampleApp.Views.MainPage"
              Title="Home">
-    <VerticalStackLayout Padding="24" Spacing="16">
+    <Grid Padding="24" RowSpacing="16" RowDefinitions="Auto,Auto,Auto">
 
-        <Label Text="Welcome back!"
+        <Label Grid.Row="1"
+               Text="Welcome back!"
                FontSize="24"
                SemanticProperties.HeadingLevel="Level1" />
 
-        <Label Text="Open the menu to reach Settings, or log out below."
+        <Label Grid.Row="0"
+               Text="Open the menu to reach Settings, or log out below."
                FontSize="14" />
 
-        <Button Text="Log Out"
+        <Button Grid.Row="2"
+                Text="Log Out"
                 Clicked="OnLogoutClicked"
-                HorizontalOptions="Start" />
+                HorizontalOptions="Start"
+                SemanticProperties.Hint="Signs you out of the app" />
 
-    </VerticalStackLayout>
+    </Grid>
 </ContentPage>
